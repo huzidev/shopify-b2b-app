@@ -31,6 +31,7 @@ export async function createPublication({
   admin,
   shop,
   catalogId,
+  title,
   defaultState = "ALL_PRODUCTS",
   autoPublish = false
 }) {
@@ -122,7 +123,7 @@ export async function createPublication({
         shopId: dbShop.id,
         catalogId: catalog?.id || null,
         shopifyId: publication.id,
-        title: publication.catalog?.title || catalog?.title || "Untitled Publication",
+        title: title || publication.catalog?.title || catalog?.title || "Untitled Publication",
         defaultState: defaultState,
         autoPublish: autoPublish
       }
@@ -166,9 +167,9 @@ export async function updatePublication({
       }
     });
 
-    // if (!publication) {
-    //   return { success: false, error: "Publication not found" };
-    // }
+    if (!publication) {
+      return { success: false, error: "Publication not found" };
+    }
 
     // Update publication in Shopify
     const response = await admin.graphql(

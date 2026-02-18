@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useFetcher, useLoaderData } from "react-router";
 import {
   Page,
@@ -20,9 +20,11 @@ import { authenticate } from "../shopify.server";
 import { 
   getPublications, 
   createPublication, 
-  addFixedPrices 
+  addFixedPrices,
+  updatePublication
 } from "../models/publicationList.server";
 import { getPriceLists } from "../models/priceList.server";
+import { useAppBridge } from '@shopify/app-bridge-react';
 
 export const loader = async ({ request }) => {
   try {
@@ -56,6 +58,7 @@ export const action = async ({ request }) => {
   try {
     if (actionType === "createPublication") {
       const catalogId = formData.get("catalogId");
+      const title = formData.get("title");
       const defaultState = formData.get("defaultState");
       const autoPublish = formData.get("autoPublish") === "true";
       
@@ -63,8 +66,22 @@ export const action = async ({ request }) => {
         admin,
         shop: session.shop,
         catalogId: catalogId ? parseInt(catalogId) : null,
+        title,
         defaultState,
         autoPublish
+      });
+    }
+    
+    if (actionType === "updatePublication") {
+      const publicationId = formData.get("publicationId");
+      const selectedProductIds = JSON.parse(formData.get("selectedProductIds") || "[]");
+      
+      return await updatePublication({
+        admin,
+        shop: session.shop,
+        publicationId,
+        publishablesToAdd: selectedProductIds,
+        publishablesToRemove: []
       });
     }
     
@@ -91,36 +108,95 @@ export default function AppPublicationList() {
   const fetcher = useFetcher();
   const { publications, priceLists } = useLoaderData();
   const isLoading = fetcher.state === "submitting";
+  const app = useAppBridge();
 
   const [selectedTab, setSelectedTab] = useState(0);
   const [modalOpen, setModalOpen] = useState(false);
   const [modalType, setModalType] = useState("publication");
+  const [selectedPublication, setSelectedPublication] = useState(null);
   const [formData, setFormData] = useState({
     catalogId: "",
+    title: "",
     defaultState: "ALL_PRODUCTS",
     autoPublish: false,
     priceListId: "",
     variantId: "",
     price: "",
     compareAtPrice: "",
-    currency: "USD"
+    currency: "USD",
+    selectedProducts: []
   });
 
   useEffect(() => {
     if (fetcher.data?.success) {
+      // Check if this was a publication update (products added)
+      if (fetcher.data?.publication) {
+        // Show success message for adding products
+        if (app?.toast) {
+          app.toast.show('Products successfully added to publication!');
+        }
+      } else {
+        // Show success message for publication creation
+        if (app?.toast) {
+          app.toast.show('Publication created successfully!');
+        }
+      }
+      
       setModalOpen(false);
       setFormData({
         catalogId: "",
+        title: "",
         defaultState: "ALL_PRODUCTS",
         autoPublish: false,
         priceListId: "",
         variantId: "",
         price: "",
         compareAtPrice: "",
-        currency: "USD"
+        currency: "USD",
+        selectedProducts: []
       });
+    } else if (fetcher.data?.error) {
+      // Show error message
+      if (app?.toast) {
+        app.toast.show(`Error: ${fetcher.data.error}`, { isError: true });
+      }
     }
-  }, [fetcher.data]);
+  }, [fetcher.data, app]);
+
+  const handleSelectProducts = useCallback(async (publication) => {
+    if (!app) {
+      console.error('App Bridge not available');
+      return;
+    }
+
+    try {
+      const selected = await app.resourcePicker({
+        type: 'product',
+        multiple: true,
+      });
+      console.log("SW what is selected PRODUCT", selected);
+
+      if (selected && selected.length > 0) {
+        // Extract product IDs for the publication update
+        const productIds = selected.map(product => product.id);
+        
+        // Submit to update the publication with selected products
+        fetcher.submit({
+          actionType: "updatePublication",
+          publicationId: publication.id.toString(),
+          selectedProductIds: JSON.stringify(productIds)
+        }, { method: "POST" });
+      }
+
+    } catch (error) {
+      console.error('Error opening resource picker:', error);
+      // Handle cancellation or other errors gracefully
+      if (error.message !== 'User cancelled resource selection') {
+        // You can add toast notification here if needed
+        console.error('Unable to open product picker. Please try again.');
+      }
+    }
+  }, [app, fetcher]);
 
   const handleCreatePublication = () => {
     setModalType("publication");
@@ -181,7 +257,7 @@ export default function AppPublicationList() {
       {publication.defaultState}
     </Badge>,
     publication.autoPublish ? "Yes" : "No",
-    <Button key={`action-${publication.id}`} size="slim">
+    <Button key={`action-${publication.id}`} size="slim" onClick={() => handleSelectProducts(publication)}>
       Manage Products
     </Button>
   ]) || [];
@@ -312,6 +388,14 @@ export default function AppPublicationList() {
               <Text variant="bodyMd" as="p">
                 Create a publication to control product visibility. You can assign a catalog now or later.
               </Text>
+              
+              <TextField
+                label="Publication Title"
+                value={formData.title}
+                onChange={(value) => setFormData({...formData, title: value})}
+                autoComplete="off"
+                placeholder="Enter publication title"
+              />
               
               <TextField
                 label="Catalog ID (Optional)"
