@@ -1,0 +1,222 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Session {
+  id            String   @id
+  shop          String
+  state         String
+  isOnline      Boolean  @default(false)
+  scope         String?
+  expires       DateTime?
+  accessToken   String
+  userId        BigInt?
+  firstName     String?
+  lastName      String?
+  email         String?
+  accountOwner  Boolean  @default(false)
+  locale        String?
+  collaborator  Boolean? @default(false)
+  emailVerified Boolean? @default(false)
+  refreshToken        String?
+  refreshTokenExpires DateTime?
+}
+
+model Shop {
+  id          Int      @id @default(autoincrement())
+  shopDomain  String   @unique
+  accessToken String
+
+  products    Product[]
+  variants    Variant[]
+  orders      Order[]
+  companies   Company[]
+  catalogs    Catalog[]
+  priceLists  PriceList[]
+  publications Publication[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("shops")
+}
+
+model Product {
+  id           Int      @id @default(autoincrement())
+  shopId       Int
+  shopifyId    String   // gid://shopify/Product/xxx
+  title        String
+  handle       String?
+  status       String?
+
+  shop         Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  variants     Variant[]
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([shopifyId, shopId])
+  @@index([shopId])
+  @@map("products")
+}
+
+model Variant {
+  id           Int      @id @default(autoincrement())
+  shopId       Int
+  shopifyId    String   // gid://shopify/ProductVariant/xxx
+  productId    Int
+  sku          String?
+  title        String?
+  price        Decimal  @db.Decimal(10,2)
+  inventory    Int      @default(0)
+
+  shop         Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  product      Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  orderItems   OrderItem[]
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([shopifyId, shopId])
+  @@index([shopId])
+  @@index([productId])
+  @@map("variants")
+}
+
+model Company {
+  id                Int                @id @default(autoincrement())
+  shopId            Int
+  shopifyId         String
+  locationShopifyId String?
+  contactShopifyId  String?
+
+  name              String
+  orders            Order[]
+  catalogs          Catalog[]          
+  locations         CompanyLocation[]  
+  shop              Shop               @relation(fields: [shopId], references: [id])
+
+  @@unique([shopifyId, shopId])
+}
+
+model CompanyLocation {
+  id            Int      @id @default(autoincrement())
+  companyId     Int
+  shopifyId     String
+  name          String
+
+  company       Company   @relation(fields: [companyId], references: [id])
+  catalogs      Catalog[] 
+
+  @@unique([shopifyId])
+}
+
+model Catalog {
+  id                  Int      @id @default(autoincrement())
+  shopId              Int
+  companyId           Int
+  companyLocationId   Int?     
+  priceListId         Int?
+  shopifyId           String   
+  title               String
+  status              String
+  publicationShopifyId String
+
+  shop                Shop            @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  company             Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  companyLocation     CompanyLocation? @relation(fields: [companyLocationId], references: [id])
+  priceList           PriceList?      @relation(fields: [priceListId], references: [id])
+  publications        Publication[]
+
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@unique([shopifyId, shopId])
+  @@index([shopId])
+  @@index([companyId])
+  @@index([companyLocationId])
+  @@index([priceListId])
+}
+
+model PriceList {
+  id                Int      @id @default(autoincrement())
+  shopId            Int
+  shopifyId         String   // gid://shopify/PriceList/xxx
+  name              String
+  currency          String
+  adjustmentType    String?  // PERCENTAGE_INCREASE, PERCENTAGE_DECREASE, FIXED_AMOUNT
+  adjustmentValue   Decimal? @db.Decimal(10,2)
+
+  shop              Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  catalogs          Catalog[]
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([shopifyId, shopId])
+  @@index([shopId])
+  @@map("price_lists")
+}
+
+model Publication {
+  id                Int      @id @default(autoincrement())
+  shopId            Int
+  catalogId         Int?
+  shopifyId         String   // gid://shopify/Publication/xxx
+  title             String?
+  defaultState      String   // ALL_PRODUCTS, EMPTY
+  autoPublish       Boolean  @default(false)
+
+  shop              Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  catalog           Catalog? @relation(fields: [catalogId], references: [id])
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([shopifyId, shopId])
+  @@index([shopId])
+  @@index([catalogId])
+  @@map("publications")
+}
+
+model Order {
+  id           Int      @id @default(autoincrement())
+  shopId       Int
+  shopifyId    String   
+  companyId    Int?
+  orderNumber  String?
+  totalPrice   Decimal? @db.Decimal(10,2)
+  currency     String?
+
+  shop         Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  company      Company? @relation(fields: [companyId], references: [id])
+  orderItems   OrderItem[]
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([shopifyId, shopId])
+  @@index([shopId])
+  @@index([companyId])
+  @@map("orders")
+}
+
+model OrderItem {
+  id         Int     @id @default(autoincrement())
+  orderId    Int
+  variantId  Int
+  quantity   Int
+  price      Decimal @db.Decimal(10,2)
+
+  order      Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  variant    Variant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([variantId])
+  @@map("order_items")
+}
