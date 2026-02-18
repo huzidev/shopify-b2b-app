@@ -1,8 +1,8 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
-client_id = "50d5d21a42e3446f990cf2887da136c5"
-name = "b2b-orders-app"
-application_url = "https://example.com"
+client_id = "93b8f7175bf11e86776f4a15320c7a1c"
+name = "b2b-staging-app"
+application_url = "https://shopify-b2b-app.vercel.app/"
 embedded = true
 
 [build]
@@ -11,17 +11,13 @@ automatically_update_urls_on_dev = true
 [webhooks]
 api_version = "2026-04"
 
-  [[webhooks.subscriptions]]
-  topics = [ "app/uninstalled" ]
-  uri = "/webhooks/app/uninstalled"
-
-  [[webhooks.subscriptions]]
-  topics = [ "app/scopes_update" ]
-  uri = "/webhooks/app/scopes_update"
-
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "write_companies,write_customers,write_products,read_publications,write_publications"
+scopes = "read_publications,write_companies,write_customers,write_products,write_publications"
 
 [auth]
-redirect_urls = [ "https://example.com/api/auth" ]
+  redirect_urls = [
+    "https://shopify-b2b-app.vercel.app/auth/callback",
+    "https://shopify-b2b-app.vercel.app/auth/shopify/callback",
+    "https://shopify-b2b-app.vercel.app/api/auth/callback"
+  ]
