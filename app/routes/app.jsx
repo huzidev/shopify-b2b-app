@@ -20,6 +20,7 @@ export default function App() {
         <s-app-nav>
           <s-link href="/app/product-sync">Sync Product</s-link>
           <s-link href="/app/create-company">Create Company</s-link>
+          <s-link href="/app/manage-companies">Manage Companies</s-link>
           <s-link href="/app/create-catalog">Create Catalog</s-link>
           <s-link href="/app/price-list">Create Price List</s-link>
           <s-link href="/app/publication-list">Manage Publications</s-link>

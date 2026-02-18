@@ -193,3 +193,216 @@ export async function createCompany({
 
   return { success: true };
 }
+
+export async function deleteCompany({ admin, shop, companyId }) {
+  try {
+    // First delete from Shopify
+    const response = await admin.graphql(
+      `#graphql
+        mutation companyDelete($id: ID!) {
+          companyDelete(id: $id) {
+            deletedCompanyId
+            userErrors {
+              field
+              message
+            }
+          }
+        }
+      `,
+      {
+        variables: {
+          id: companyId
+        }
+      }
+    );
+
+    const data = await response.json();
+    const result = data.data.companyDelete;
+
+    if (result.userErrors.length > 0) {
+      return {
+        success: false,
+        error: result.userErrors[0].message
+      };
+    }
+
+    // Then delete from database
+    const dbShop = await prisma.shop.findUnique({
+      where: { shopDomain: shop }
+    });
+
+    await prisma.company.delete({
+      where: {
+        shopifyId_shopId: {
+          shopifyId: companyId,
+          shopId: dbShop.id
+        }
+      }
+    });
+
+    return { success: true };
+  } catch (error) {
+    console.error("Error deleting company:", error);
+    return {
+      success: false,
+      error: "Failed to delete company"
+    };
+  }
+}
+
+export async function updateCompany({ admin, shop, companyId, name }) {
+  try {
+    const response = await admin.graphql(
+      `#graphql
+        mutation companyUpdate($companyId: ID!, $input: CompanyInput!) {
+          companyUpdate(companyId: $companyId, input: $input) {
+            company {
+              id
+              name
+            }
+            userErrors {
+              field
+              message
+            }
+          }
+        }
+      `,
+      {
+        variables: {
+          companyId: companyId,
+          input: {
+            name: name
+          }
+        }
+      }
+    );
+
+    const data = await response.json();
+    const result = data.data.companyUpdate;
+
+    if (result.userErrors.length > 0) {
+      return {
+        success: false,
+        error: result.userErrors[0].message
+      };
+    }
+
+    // Update in database
+    const dbShop = await prisma.shop.findUnique({
+      where: { shopDomain: shop }
+    });
+
+    await prisma.company.updateMany({
+      where: {
+        shopifyId: companyId,
+        shopId: dbShop.id
+      },
+      data: {
+        name: name
+      }
+    });
+
+    return { success: true };
+  } catch (error) {
+    console.error("Error updating company:", error);
+    return {
+      success: false,
+      error: "Failed to update company"
+    };
+  }
+}
+
+export async function createCompanyLocation({ admin, shop, companyId, locationData }) {
+  try {
+    const response = await admin.graphql(
+      `#graphql
+        mutation companyLocationCreate($companyId: ID!, $input: CompanyLocationInput!) {
+          companyLocationCreate(companyId: $companyId, input: $input) {
+            companyLocation {
+              id
+              name
+              phone
+              locale
+              externalId
+              note
+              billingAddress {
+                address1
+                address2
+                city
+                zip
+                firstName
+                lastName
+                phone
+                countryCode
+              }
+              shippingAddress {
+                address1
+                address2
+                city
+                zip
+                firstName
+                lastName
+                phone
+                countryCode
+              }
+            }
+            userErrors {
+              field
+              message
+            }
+          }
+        }
+      `,
+      {
+        variables: {
+          companyId: companyId,
+          input: locationData
+        }
+      }
+    );
+
+    const data = await response.json();
+    const result = data.data.companyLocationCreate;
+
+    if (result.userErrors.length > 0) {
+      return {
+        success: false,
+        error: result.userErrors[0].message
+      };
+    }
+
+    const location = result.companyLocation;
+
+    // Save location to database
+    const dbShop = await prisma.shop.findUnique({
+      where: { shopDomain: shop }
+    });
+
+    const dbCompany = await prisma.company.findUnique({
+      where: {
+        shopifyId_shopId: {
+          shopifyId: companyId,
+          shopId: dbShop.id
+        }
+      }
+    });
+
+    if (dbCompany) {
+      await prisma.companyLocation.create({
+        data: {
+          companyId: dbCompany.id,
+          shopifyId: location.id,
+          name: location.name,
+        }
+      });
+    }
+
+    return { success: true };
+  } catch (error) {
+    console.error("Error creating company location:", error);
+    return {
+      success: false,
+      error: "Failed to create company location"
+    };
+  }
+}
