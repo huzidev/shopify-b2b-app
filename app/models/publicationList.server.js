@@ -13,7 +13,8 @@ export async function getPublications(shop) {
     const publications = await db.publication.findMany({
       where: { shopId: dbShop.id },
       include: {
-        catalog: true
+        catalog: true,
+        products: true
       },
       orderBy: {
         createdAt: 'desc'
@@ -23,6 +24,37 @@ export async function getPublications(shop) {
     return publications;
   } catch (error) {
     console.error("Error fetching publications:", error);
+    return [];
+  }
+}
+
+export async function getPublicationProducts(shop, publicationId) {
+  try {
+    const dbShop = await db.shop.findUnique({
+      where: { shopDomain: shop }
+    });
+
+    if (!dbShop) {
+      return [];
+    }
+
+    const publication = await db.publication.findFirst({
+      where: {
+        id: parseInt(publicationId),
+        shopId: dbShop.id
+      },
+      include: {
+        products: true
+      }
+    });
+
+    if (!publication) {
+      return [];
+    }
+
+    return publication.products.map(pp => pp.productId);
+  } catch (error) {
+    console.error("Error fetching publication products:", error);
     return [];
   }
 }
@@ -164,6 +196,9 @@ export async function updatePublication({
       where: {
         id: parseInt(publicationId),
         shopId: dbShop.id
+      },
+      include: {
+        products: true
       }
     });
 
@@ -214,6 +249,34 @@ export async function updatePublication({
         success: false,
         error: result.userErrors[0].message
       };
+    }
+
+    // Update local database
+    // Remove products that were removed
+    if (publishablesToRemove.length > 0) {
+      await db.publicationProduct.deleteMany({
+        where: {
+          publicationId: publication.id,
+          productId: {
+            in: publishablesToRemove
+          }
+        }
+      });
+    }
+
+    // Add products that were added
+    if (publishablesToAdd.length > 0) {
+      const existingProducts = publication.products.map(p => p.productId);
+      const newProducts = publishablesToAdd.filter(productId => !existingProducts.includes(productId));
+      
+      if (newProducts.length > 0) {
+        await db.publicationProduct.createMany({
+          data: newProducts.map(productId => ({
+            publicationId: publication.id,
+            productId
+          }))
+        });
+      }
     }
 
     return { 

@@ -72,16 +72,60 @@ export const action = async ({ request }) => {
       });
     }
     
+    if (actionType === "fetchProductDetails") {
+      const productIds = JSON.parse(formData.get("productIds") || "[]");
+      
+      if (productIds.length === 0) {
+        return { success: true, products: [] };
+      }
+      
+      // Create GraphQL query to fetch product details
+      const productQueries = productIds.map((id, index) => {
+        return `
+          product${index}: product(id: "${id}") {
+            id
+            title
+            handle
+            status
+            featuredImage {
+              url
+              altText
+            }
+          }
+        `;
+      }).join('\n');
+      
+      const query = `#graphql
+        query getProductDetails {
+          ${productQueries}
+        }
+      `;
+      
+      try {
+        const response = await admin.graphql(query);
+        const data = await response.json();
+        
+        // Convert the response object to an array of products
+        const products = Object.values(data.data).filter(product => product !== null);
+        
+        return { success: true, products };
+      } catch (error) {
+        console.error('Error fetching product details:', error);
+        return { success: false, error: 'Failed to fetch product details' };
+      }
+    }
+    
     if (actionType === "updatePublication") {
       const publicationId = formData.get("publicationId");
-      const selectedProductIds = JSON.parse(formData.get("selectedProductIds") || "[]");
+      const publishablesToAdd = JSON.parse(formData.get("publishablesToAdd") || "[]");
+      const publishablesToRemove = JSON.parse(formData.get("publishablesToRemove") || "[]");
       
       return await updatePublication({
         admin,
         shop: session.shop,
         publicationId,
-        publishablesToAdd: selectedProductIds,
-        publishablesToRemove: []
+        publishablesToAdd,
+        publishablesToRemove
       });
     }
     
@@ -112,8 +156,13 @@ export default function AppPublicationList() {
 
   const [selectedTab, setSelectedTab] = useState(0);
   const [modalOpen, setModalOpen] = useState(false);
-  const [modalType, setModalType] = useState("publication");
+  const [modalType, setModalType] = useState("publication"); // "publication", "prices", "addProducts", "removeProducts"
   const [selectedPublication, setSelectedPublication] = useState(null);
+  const [selectedProductsForAdd, setSelectedProductsForAdd] = useState([]);
+  const [productsToRemove, setProductsToRemove] = useState([]);
+  const [productDetails, setProductDetails] = useState([]); // Store fetched product details
+  const [fetchingProducts, setFetchingProducts] = useState(false);
+  const [modalLoading, setModalLoading] = useState(false);
   const [formData, setFormData] = useState({
     catalogId: "",
     title: "",
@@ -129,11 +178,27 @@ export default function AppPublicationList() {
 
   useEffect(() => {
     if (fetcher.data?.success) {
-      // Check if this was a publication update (products added)
+      // Handle product details fetch
+      if (fetcher.data?.products && modalType === "removeProducts") {
+        setProductDetails(fetcher.data.products);
+        setFetchingProducts(false);
+        return;
+      }
+      
+      // Clear modal loading state
+      setModalLoading(false);
+      
+      // Check if this was a publication update (products added/removed)
       if (fetcher.data?.publication) {
-        // Show success message for adding products
+        // Show success message for managing products
         if (app?.toast) {
-          app.toast.show('Products successfully added to publication!');
+          if (modalType === "addProducts") {
+            app.toast.show('Products successfully added to publication!');
+          } else if (modalType === "removeProducts") {
+            app.toast.show('Products successfully removed from publication!');
+          } else {
+            app.toast.show('Products successfully updated in publication!');
+          }
         }
       } else {
         // Show success message for publication creation
@@ -142,7 +207,13 @@ export default function AppPublicationList() {
         }
       }
       
+      // Close modal and reset states
       setModalOpen(false);
+      setSelectedPublication(null);
+      setSelectedProductsForAdd([]);
+      setProductsToRemove([]);
+      setProductDetails([]);
+      setFetchingProducts(false);
       setFormData({
         catalogId: "",
         title: "",
@@ -156,45 +227,94 @@ export default function AppPublicationList() {
         selectedProducts: []
       });
     } else if (fetcher.data?.error) {
+      // Clear modal loading state on error
+      setModalLoading(false);
+      
       // Show error message
       if (app?.toast) {
         app.toast.show(`Error: ${fetcher.data.error}`, { isError: true });
       }
     }
-  }, [fetcher.data, app]);
+  }, [fetcher.data, app, modalType]);
 
-  const handleSelectProducts = useCallback(async (publication) => {
+  const handleAddProducts = useCallback(async (publication) => {
     if (!app) {
       console.error('App Bridge not available');
       return;
     }
 
     try {
+      // Open product picker for adding new products (no pre-selection)
       const selected = await app.resourcePicker({
         type: 'product',
         multiple: true,
+        // filter: {
+        //   query: 'status:active AND tag:featured',
+        // },
       });
-      console.log("SW what is selected PRODUCT", selected);
+      
+      console.log("SW selected products to add:", selected);
 
       if (selected && selected.length > 0) {
-        // Extract product IDs for the publication update
-        const productIds = selected.map(product => product.id);
+        // Get existing products to filter out already added ones
+        const existingProducts = publication.products || [];
+        console.log("SW existing products:", existingProducts);
+        const existingProductIds = existingProducts.map(p => p.productId);
         
-        // Submit to update the publication with selected products
-        fetcher.submit({
-          actionType: "updatePublication",
-          publicationId: publication.id.toString(),
-          selectedProductIds: JSON.stringify(productIds)
-        }, { method: "POST" });
+        // Only add products that aren't already in the publication
+        const publishablesToAdd = selected.filter(product => !existingProductIds.includes(product.id));
+        
+        if (publishablesToAdd.length > 0) {
+          setSelectedPublication(publication);
+          setSelectedProductsForAdd(publishablesToAdd);
+          setModalType("addProducts");
+          setModalOpen(true);
+        } else {
+          if (app?.toast) {
+            app.toast.show('All selected products are already in this publication.');
+          }
+        }
       }
 
     } catch (error) {
-      console.error('Error opening resource picker:', error);
-      // Handle cancellation or other errors gracefully
+      console.error('Error opening product picker:', error);
       if (error.message !== 'User cancelled resource selection') {
-        // You can add toast notification here if needed
-        console.error('Unable to open product picker. Please try again.');
+        if (app?.toast) {
+          app.toast.show('Unable to open product picker. Please try again.', { isError: true });
+        }
       }
+    }
+  }, [app]);
+
+  const handleRemoveProducts = useCallback(async (publication) => {
+    const existingProducts = publication.products || [];
+    
+    if (existingProducts.length === 0) {
+      if (app?.toast) {
+        app.toast.show('No products in this publication to remove.');
+      }
+      return;
+    }
+
+    setSelectedPublication(publication);
+    setProductsToRemove([...existingProducts.map(p => p.productId)]); // Initially all products selected for removal
+    setModalType("removeProducts");
+    setModalOpen(true);
+    setFetchingProducts(true);
+    
+    // Fetch product details via GraphQL
+    const productIds = existingProducts.map(p => p.productId);
+    
+    try {
+      const response = await fetcher.submit({
+        actionType: "fetchProductDetails",
+        productIds: JSON.stringify(productIds)
+      }, { method: "POST" });
+      
+      // The response will be handled in the useEffect
+    } catch (error) {
+      console.error('Error fetching product details:', error);
+      setFetchingProducts(false);
     }
   }, [app, fetcher]);
 
@@ -232,6 +352,27 @@ export default function AppPublicationList() {
         priceListId: formData.priceListId,
         prices: JSON.stringify(prices)
       }, { method: "POST" });
+    } else if (modalType === "addProducts") {
+      setModalLoading(true);
+      const publishablesToAdd = selectedProductsForAdd.map(product => product.id);
+      
+      fetcher.submit({
+        actionType: "updatePublication",
+        publicationId: selectedPublication.id.toString(),
+        publishablesToAdd: JSON.stringify(publishablesToAdd),
+        publishablesToRemove: JSON.stringify([])
+      }, { method: "POST" });
+    } else if (modalType === "removeProducts") {
+      setModalLoading(true);
+      const existingProductIds = selectedPublication.products.map(p => p.productId);
+      const publishablesToRemove = existingProductIds.filter(id => productsToRemove.includes(id));
+      
+      fetcher.submit({
+        actionType: "updatePublication",
+        publicationId: selectedPublication.id.toString(),
+        publishablesToAdd: JSON.stringify([]),
+        publishablesToRemove: JSON.stringify(publishablesToRemove)
+      }, { method: "POST" });
     }
   };
 
@@ -257,9 +398,26 @@ export default function AppPublicationList() {
       {publication.defaultState}
     </Badge>,
     publication.autoPublish ? "Yes" : "No",
-    <Button key={`action-${publication.id}`} size="slim" onClick={() => handleSelectProducts(publication)}>
-      Manage Products
-    </Button>
+    <InlineStack key={`action-${publication.id}`} gap="2" align="center" wrap={false}>
+      <Text variant="bodySm" tone="subdued">
+        {publication.products?.length || 0} product{(publication.products?.length || 0) === 1 ? '' : 's'}
+      </Text>
+      <Button 
+        size="slim" 
+        onClick={() => handleAddProducts(publication)}
+      >
+        Add Products
+      </Button>
+      <Button 
+        size="slim" 
+        variant="secondary"
+        tone="critical"
+        onClick={() => handleRemoveProducts(publication)}
+        disabled={(publication.products?.length || 0) === 0}
+      >
+        Remove Products
+      </Button>
+    </InlineStack>
   ]) || [];
 
   const renderPublicationsTab = () => (
@@ -368,17 +526,38 @@ export default function AppPublicationList() {
       <Modal
         open={modalOpen}
         onClose={() => setModalOpen(false)}
-        title={modalType === "publication" ? "Create Publication" : "Set Fixed Prices"}
+        title={
+          modalType === "publication" ? "Create Publication" : 
+          modalType === "prices" ? "Set Fixed Prices" :
+          modalType === "addProducts" ? "Add Products" :
+          modalType === "removeProducts" ? "Remove Products" : ""
+        }
         primaryAction={{
-          content: modalType === "publication" ? "Create" : "Set Prices",
+          content: 
+            modalType === "publication" ? "Create" : 
+            modalType === "prices" ? "Set Prices" :
+            modalType === "addProducts" ? "Add Products" :
+            modalType === "removeProducts" ? "Remove Selected Products" : "",
           onAction: handleSubmit,
-          loading: isLoading,
-          disabled: isLoading || (modalType === "publication" ? false : !formData.priceListId || !formData.variantId || !formData.price)
+          loading: modalType === "publication" ? isLoading : modalLoading,
+          disabled: 
+            modalType === "publication" ? isLoading : 
+            modalType === "prices" ? (!formData.priceListId || !formData.variantId || !formData.price) :
+            modalType === "addProducts" ? modalLoading :
+            modalType === "removeProducts" ? (modalLoading || productsToRemove.length === 0) : false
         }}
         secondaryActions={[
           {
             content: "Cancel",
-            onAction: () => setModalOpen(false)
+            onAction: () => {
+              setModalOpen(false);
+              setSelectedPublication(null);
+              setSelectedProductsForAdd([]);
+              setProductsToRemove([]);
+              setProductDetails([]);
+              setFetchingProducts(false);
+              setModalLoading(false);
+            }
           }
         ]}
       >
@@ -424,7 +603,7 @@ export default function AppPublicationList() {
                 {" "}Auto-publish new products
               </label>
             </BlockStack>
-          ) : (
+          ) : modalType === "prices" ? (
             <BlockStack gap="4">
               <Text variant="bodyMd" as="p">
                 Set fixed prices for specific product variants. This will override the price list's adjustment rules.
@@ -483,7 +662,125 @@ export default function AppPublicationList() {
                 onChange={(value) => setFormData({...formData, currency: value})}
               />
             </BlockStack>
-          )}
+          ) : modalType === "addProducts" ? (
+            <BlockStack gap="4">
+              {modalLoading ? (
+                <BlockStack gap="4" align="center">
+                  <div style={{ padding: "2rem", textAlign: "center" }}>
+                    <Text variant="bodyMd" as="p" tone="subdued">
+                      Adding products to publication...
+                    </Text>
+                    <Text variant="bodyMd" as="p" tone="subdued">
+                      Please wait while we process your request.
+                    </Text>
+                  </div>
+                </BlockStack>
+              ) : (
+                <>
+                  <Text variant="bodyMd" as="p">
+                    The following {selectedProductsForAdd.length} product{selectedProductsForAdd.length === 1 ? '' : 's'} will be added to "{selectedPublication?.title}":
+                  </Text>
+                  
+                  <BlockStack gap="2">
+                    {selectedProductsForAdd.map((product, index) => (
+                      <Card key={product.id} sectioned>
+                        <Text variant="bodyMd" as="p" fontWeight="semibold">
+                          {product.title}
+                        </Text>
+                        <Text variant="bodySm" as="p" tone="subdued">
+                          ID: {product.id}
+                        </Text>
+                      </Card>
+                    ))}
+                  </BlockStack>
+                </>
+              )}
+            </BlockStack>
+          ) : modalType === "removeProducts" ? (
+            <BlockStack gap="4">
+              {fetchingProducts ? (
+                <BlockStack gap="4" align="center">
+                  <div style={{ padding: "2rem", textAlign: "center" }}>
+                    <Text variant="bodyMd" as="p" tone="subdued">
+                      Loading product details...
+                    </Text>
+                    <Text variant="bodyMd" as="p" tone="subdued">
+                      Please wait while we fetch product information.
+                    </Text>
+                  </div>
+                </BlockStack>
+              ) : (
+                <>
+                  <Text variant="bodyMd" as="p">
+                    Select products to remove from "{selectedPublication?.title}":
+                  </Text>
+                  
+                  <BlockStack gap="2">
+                    {selectedPublication?.products?.map((productRelation) => {
+                      // Find matching product details
+                      const productDetail = productDetails.find(p => p.id === productRelation.productId);
+                      
+                      return (
+                        <Card key={productRelation.id} sectioned>
+                          <InlineStack gap="3" align="space-between">
+                            <InlineStack gap="3" align="start">
+                              {productDetail?.featuredImage?.url && (
+                                <div style={{ width: "48px", height: "48px", borderRadius: "4px", overflow: "hidden" }}>
+                                  <img 
+                                    src={productDetail.featuredImage.url} 
+                                    alt={productDetail.featuredImage.altText || productDetail.title}
+                                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                                  />
+                                </div>
+                              )}
+                              
+                              <BlockStack gap="1">
+                                <Text variant="bodyMd" as="p" fontWeight="semibold">
+                                  {productDetail?.title || `Product ID: ${productRelation.productId}`}
+                                </Text>
+                                <Text variant="bodySm" as="p" tone="subdued">
+                                  {productDetail?.handle && `Handle: ${productDetail.handle}`}
+                                </Text>
+                                <Text variant="bodySm" as="p" tone="subdued">
+                                  Added: {new Date(productRelation.createdAt).toLocaleDateString()}
+                                </Text>
+                                {productDetail?.status && (
+                                  <Badge status={productDetail.status === "ACTIVE" ? "success" : "attention"}>
+                                    {productDetail.status}
+                                  </Badge>
+                                )}
+                              </BlockStack>
+                            </InlineStack>
+                            
+                            <label>
+                              <input
+                                type="checkbox"
+                                checked={productsToRemove.includes(productRelation.productId)}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setProductsToRemove([...productsToRemove, productRelation.productId]);
+                                  } else {
+                                    setProductsToRemove(productsToRemove.filter(id => id !== productRelation.productId));
+                                  }
+                                }}
+                              />
+                              {" "}Remove
+                            </label>
+                          </InlineStack>
+                        </Card>
+                      );
+                    })}
+                  </BlockStack>
+                  
+                  {productsToRemove.length > 0 && (
+                    <Text variant="bodyMd" as="p" tone="critical">
+                      {productsToRemove.length} product{productsToRemove.length === 1 ? '' : 's'} will be removed.
+                    </Text>
+                  )}
+                </>
+              )}
+            </BlockStack>
+          ) : null}
         </Modal.Section>
       </Modal>
     </Page>
