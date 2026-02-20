@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from "react";
-import { useFetcher, useActionData, useLoaderData } from "react-router";
+import { useFetcher, useActionData, useLoaderData, useNavigate } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { getCompanies, deleteCompany, updateCompany, createCompanyLocation } from "../models/company.server";
