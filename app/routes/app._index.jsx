@@ -91,40 +91,40 @@ export default function Dashboard() {
     <Page title="Dashboard">
       <BlockStack gap="500">
         {/* Stats Row */}
-        <Layout>
-          <Layout.Section variant="oneQuarter">
+        <InlineStack>
+          <Box width="25%">
             <StatCard
               label="Total companies"
               value={stats.totalCompanies.toString()}
               trend={stats.totalCompanies > 0 ? "Companies active" : "No companies yet"}
               trendType={stats.totalCompanies > 0 ? "success" : "subdued"}
             />
-          </Layout.Section>
-          <Layout.Section variant="oneQuarter">
+          </Box>
+          <Box width="25%">
             <StatCard
               label="Active catalogs"
               value={stats.activeCatalogs.toString()}
               trend={stats.activeCatalogs > 0 ? `${stats.activeCatalogs} active` : "No active catalogs"}
               trendType={stats.activeCatalogs > 0 ? "success" : "subdued"}
             />
-          </Layout.Section>
-          <Layout.Section variant="oneQuarter">
+          </Box>
+          <Box width="25%">
             <StatCard
               label="Locations"
               value={stats.totalLocations.toString()}
               trend={stats.totalLocations > 0 ? "Locations configured" : "No locations yet"}
               trendType={stats.totalLocations > 0 ? "success" : "subdued"}
             />
-          </Layout.Section>
-          <Layout.Section variant="oneQuarter">
+          </Box>
+          <Box width="25%">
             <StatCard
               label="Publications"
               value={stats.totalPublications.toString()}
               trend={stats.pendingPublications > 0 ? `${stats.pendingPublications} pending` : "All configured"}
               trendType={stats.pendingPublications > 0 ? "warning" : "success"}
             />
-          </Layout.Section>
-        </Layout>
+          </Box>
+        </InlineStack>
 
         {/* Recent Activity */}
         <Card>
