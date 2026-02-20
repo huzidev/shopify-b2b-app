@@ -1,8 +1,8 @@
 import React, { useState, useCallback } from "react";
-import { useFetcher, useActionData, useLoaderData } from "react-router";
+import { useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
-import { getCompanies, deleteCompany, updateCompany, createCompanyLocation } from "../models/company.server";
+import { getCatalogs } from "../models/catalog.server";
 import {
   Page,
   Card,
@@ -23,88 +23,23 @@ import {
 import { SearchIcon, SortIcon, ChevronDownIcon } from "@shopify/polaris-icons";
 
 export const loader = async ({ request }) => {
-  const { admin, session } = await authenticate.admin(request);
+  const { session } = await authenticate.admin(request);
+  const catalogs = await getCatalogs(session.shop);
   
-  const companies = await getCompanies(session.shop);
-  
-  return { companies };
-};
-
-export const action = async ({ request }) => {
-  const { admin, session } = await authenticate.admin(request);
-  const formData = await request.formData();
-  const actionType = formData.get("actionType");
-  
-  if (actionType === "delete") {
-    const companyId = formData.get("companyId");
-    return await deleteCompany({
-      admin,
-      shop: session.shop,
-      companyId
-    });
-  }
-  
-  if (actionType === "update") {
-    const companyId = formData.get("companyId");
-    const name = formData.get("name");
-    return await updateCompany({
-      admin,
-      shop: session.shop,
-      companyId,
-      name
-    });
-  }
-  
-  if (actionType === "create-location") {
-    const companyId = formData.get("companyId");
-    const locationData = {
-      name: formData.get("name"),
-      phone: formData.get("phone"),
-      locale: formData.get("locale"),
-      externalId: formData.get("externalId"),
-      note: formData.get("note"),
-      billingAddress: {
-        address1: formData.get("billingAddress1"),
-        address2: formData.get("billingAddress2"),
-        city: formData.get("billingCity"),
-        zip: formData.get("billingZip"),
-        firstName: formData.get("billingFirstName"),
-        lastName: formData.get("billingLastName"),
-        phone: formData.get("billingPhone"),
-        countryCode: formData.get("billingCountryCode") || "US"
-      },
-      shippingAddress: {
-        address1: formData.get("shippingAddress1"),
-        address2: formData.get("shippingAddress2"),
-        city: formData.get("shippingCity"),
-        zip: formData.get("shippingZip"),
-        firstName: formData.get("shippingFirstName"),
-        lastName: formData.get("shippingLastName"),
-        phone: formData.get("shippingPhone"),
-        countryCode: formData.get("shippingCountryCode") || "US"
-      },
-      billingSameAsShipping: formData.get("billingSameAsShipping") === "true",
-      taxExempt: formData.get("taxExempt") === "true"
-    };
-    
-    return await createCompanyLocation({
-      admin,
-      shop: session.shop,
-      companyId,
-      locationData
-    });
-  }
-  
-  return { success: false, error: "Unknown action" };
+  return { catalogs };
 };
 
 const statusBadgeTone = {
   Active: "success",
+  ACTIVE: "success", 
   Inactive: "enabled",
+  INACTIVE: "enabled",
+  Draft: "warning",
+  DRAFT: "warning",
 };
 
-export default function Companies() {
-  const { companies } = useLoaderData();
+export default function Catalogs() {
+  const { catalogs } = useLoaderData();
   const [searchValue, setSearchValue] = useState("");
   const [selectedIds, setSelectedIds] = useState([]); 
   const [statusPopoverActive, setStatusPopoverActive] = useState(false);
@@ -112,30 +47,30 @@ export default function Companies() {
   const [currentPage, setCurrentPage] = useState(1);
   const perPage = 5;
 
-  // Transform database companies to match UI format
-  const transformedCompanies = companies?.map(company => ({
-    id: company.id,
-    name: company.name,
-    email: company.contactShopifyId || `contact@${company.name.toLowerCase().replace(/\s+/g, '')}.com`, // fallback email
-    locations: company.locations?.length || 0,
-    catalogs: company._count?.catalogs || 0,
-    status: "Active" // Default to Active, can be enhanced based on actual status logic
+  // Transform database catalogs to match UI format
+  const transformedCatalogs = catalogs?.map(catalog => ({
+    id: catalog.id,
+    name: catalog.title,
+    products: catalog.publications?.reduce((total, pub) => total + (pub.products?.length || 0), 0) || 0,
+    assignedCompanies: 1, // For now, each catalog is assigned to one company
+    companyName: catalog.company?.name || "N/A",
+    status: catalog.status || "Active"
   })) || [];
 
-  const filteredCompanies = transformedCompanies.filter(
+  const filteredCatalogs = transformedCatalogs.filter(
     (c) =>
       c.name.toLowerCase().includes(searchValue.toLowerCase()) ||
-      c.email.toLowerCase().includes(searchValue.toLowerCase())
+      c.companyName.toLowerCase().includes(searchValue.toLowerCase())
   );
 
-  const totalCompanies = filteredCompanies.length;
+  const totalCatalogs = filteredCatalogs.length;
   const startIndex = (currentPage - 1) * perPage + 1;
-  const endIndex = Math.min(currentPage * perPage, filteredCompanies.length);
-  const paginatedCompanies = filteredCompanies.slice((currentPage - 1) * perPage, currentPage * perPage);
+  const endIndex = Math.min(currentPage * perPage, filteredCatalogs.length);
+  const paginatedCatalogs = filteredCatalogs.slice((currentPage - 1) * perPage, currentPage * perPage);
 
   const allSelected =
-    paginatedCompanies.length > 0 &&
-    paginatedCompanies.every((c) => selectedIds.includes(c.id));
+    paginatedCatalogs.length > 0 &&
+    paginatedCatalogs.every((c) => selectedIds.includes(c.id));
   const someSelected =
     selectedIds.length > 0 && !allSelected;
 
@@ -143,9 +78,9 @@ export default function Companies() {
     if (allSelected) {
       setSelectedIds([]);
     } else {
-      setSelectedIds(paginatedCompanies.map((c) => c.id));
+      setSelectedIds(paginatedCatalogs.map((c) => c.id));
     }
-  }, [allSelected, paginatedCompanies]);
+  }, [allSelected, paginatedCatalogs]);
 
   const handleSelectRow = useCallback((id) => {
     setSelectedIds((prev) =>
@@ -157,14 +92,14 @@ export default function Companies() {
 
   return (
     <Page
-      title="Companies"
+      title="Catalogs"
       backAction={{
         content: "Back to Dashboard",
         url: "/app"
       }}
       primaryAction={
-        <Button variant="primary" url="/app/create-company">
-          Create company
+        <Button variant="primary" url="/app/create-catalog">
+          Create catalog
         </Button>
       }
     >
@@ -176,7 +111,7 @@ export default function Companies() {
               <div style={{ flex: 1 }}>
                 <TextField
                   prefix={<SearchIcon />}
-                  placeholder="Search companies..."
+                  placeholder="Search catalogs..."
                   value={searchValue}
                   onChange={setSearchValue}
                   autoComplete="off"
@@ -203,6 +138,7 @@ export default function Companies() {
                     { content: "All", onAction: () => setStatusPopoverActive(false) },
                     { content: "Active", onAction: () => setStatusPopoverActive(false) },
                     { content: "Inactive", onAction: () => setStatusPopoverActive(false) },
+                    { content: "Draft", onAction: () => setStatusPopoverActive(false) },
                   ]}
                 />
               </Popover>
@@ -222,10 +158,10 @@ export default function Companies() {
               >
                 <ActionList
                   items={[
-                    { content: "Company name A–Z", onAction: () => setSortPopoverActive(false) },
-                    { content: "Company name Z–A", onAction: () => setSortPopoverActive(false) },
-                    { content: "Most locations", onAction: () => setSortPopoverActive(false) },
-                    { content: "Most catalogs", onAction: () => setSortPopoverActive(false) },
+                    { content: "Catalog name A–Z", onAction: () => setSortPopoverActive(false) },
+                    { content: "Catalog name Z–A", onAction: () => setSortPopoverActive(false) },
+                    { content: "Most products", onAction: () => setSortPopoverActive(false) },
+                    { content: "Most companies", onAction: () => setSortPopoverActive(false) },
                   ]}
                 />
               </Popover>
@@ -254,7 +190,7 @@ export default function Companies() {
                     </Text>
                   </InlineStack>
                   <InlineStack gap="200">
-                    <Button>Assign catalog</Button>
+                    <Button>Assign to company</Button>
                     <Button>Deactivate</Button>
                   </InlineStack>
                 </InlineStack>
@@ -268,7 +204,7 @@ export default function Companies() {
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "40px 1fr 1fr 100px 100px 100px 80px",
+                gridTemplateColumns: "40px 1fr 100px 150px 100px 80px",
                 alignItems: "center",
                 gap: "8px",
               }}
@@ -282,16 +218,13 @@ export default function Companies() {
               )}
               {selectedCount > 0 && <div />}
               <Text variant="bodySm" fontWeight="semibold" tone="subdued">
-                Company name
+                Catalog name
+              </Text>
+              <Text variant="bodySm" fontWeight="semibold" tone="subdued" alignment="end">
+                Products
               </Text>
               <Text variant="bodySm" fontWeight="semibold" tone="subdued">
-                Email
-              </Text>
-              <Text variant="bodySm" fontWeight="semibold" tone="subdued" alignment="end">
-                Locations
-              </Text>
-              <Text variant="bodySm" fontWeight="semibold" tone="subdued" alignment="end">
-                Catalogs
+                Assigned company
               </Text>
               <Text variant="bodySm" fontWeight="semibold" tone="subdued">
                 Status
@@ -306,10 +239,10 @@ export default function Companies() {
 
           {/* Table Rows */}
           <BlockStack gap="0">
-            {paginatedCompanies.map((company, index) => {
-              const isSelected = selectedIds.includes(company.id);
+            {paginatedCatalogs.map((catalog, index) => {
+              const isSelected = selectedIds.includes(catalog.id);
               return (
-                <React.Fragment key={company.id}>
+                <React.Fragment key={catalog.id}>
                   <Box
                     paddingInline="400"
                     paddingBlock="300"
@@ -318,57 +251,54 @@ export default function Companies() {
                     <div
                       style={{
                         display: "grid",
-                        gridTemplateColumns: "40px 1fr 1fr 100px 100px 100px 80px",
+                        gridTemplateColumns: "40px 1fr 100px 150px 100px 80px",
                         alignItems: "center",
                         gap: "8px",
                       }}
                     >
                       <Checkbox
                         checked={isSelected}
-                        onChange={() => handleSelectRow(company.id)}
+                        onChange={() => handleSelectRow(catalog.id)}
                       />
-                      <Link url={`/app/company/${company.id}`} monochrome removeUnderline={false}>
+                      <Link url={`/app/catalog/${catalog.id}`} monochrome removeUnderline={false}>
                         <Text variant="bodyMd" tone="interactive">
-                          {company.name}
+                          {catalog.name}
                         </Text>
                       </Link>
+                      <Text variant="bodyMd" alignment="end">
+                        {catalog.products}
+                      </Text>
                       <Text variant="bodyMd" tone="subdued">
-                        {company.email}
-                      </Text>
-                      <Text variant="bodyMd" alignment="end">
-                        {company.locations}
-                      </Text>
-                      <Text variant="bodyMd" alignment="end">
-                        {company.catalogs}
+                        {catalog.companyName}
                       </Text>
                       <div>
-                        <Badge tone={statusBadgeTone[company.status]}>
-                          {company.status}
+                        <Badge tone={statusBadgeTone[catalog.status]}>
+                          {catalog.status}
                         </Badge>
                       </div>
                       <div style={{ textAlign: "right" }}>
-                        <Button variant="plain" tone="interactive">
-                          Edit
+                        <Button variant="plain" tone="interactive" url={`/app/catalog/${catalog.id}`}>
+                          View
                         </Button>
                       </div>
                     </div>
                   </Box>
-                  {index < paginatedCompanies.length - 1 && <Divider />}
+                  {index < paginatedCatalogs.length - 1 && <Divider />}
                 </React.Fragment>
               );
             })}
           </BlockStack>
 
           {/* Empty state */}
-          {paginatedCompanies.length === 0 && (
+          {paginatedCatalogs.length === 0 && (
             <Box padding="800">
               <BlockStack align="center" inlineAlign="center" gap="200">
                 <Text variant="bodyMd" tone="subdued">
-                  {searchValue ? "No companies found matching your search." : "No companies found. Create your first company to get started."}
+                  {searchValue ? "No catalogs found matching your search." : "No catalogs found. Create your first catalog to get started."}
                 </Text>
                 {!searchValue && (
-                  <Button variant="primary" url="/app/create-company">
-                    Create company
+                  <Button variant="primary" url="/app/create-catalog">
+                    Create catalog
                   </Button>
                 )}
               </BlockStack>
@@ -381,7 +311,7 @@ export default function Companies() {
           <Box paddingInline="400" paddingBlock="300">
             <InlineStack align="space-between" blockAlign="center">
               <Text variant="bodySm" tone="subdued">
-                {startIndex}–{endIndex} of {totalCompanies} companies
+                {startIndex}–{endIndex} of {totalCatalogs} catalogs
               </Text>
               <InlineStack gap="200">
                 <Button
@@ -392,7 +322,7 @@ export default function Companies() {
                 </Button>
                 <Button
                   onClick={() => setCurrentPage((p) => p + 1)}
-                  disabled={endIndex >= totalCompanies}
+                  disabled={endIndex >= totalCatalogs}
                 >
                   Next
                 </Button>

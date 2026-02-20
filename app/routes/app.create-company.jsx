@@ -71,7 +71,6 @@ export default function AppCreateCompany() {
     }
   }, [fetcher.data, shopify]);
 
-
   const handleSubmit = () => {
     fetcher.submit(
       { name, locationName, firstName, lastName, email },
@@ -84,8 +83,8 @@ export default function AppCreateCompany() {
       title="Create Company"
       subtitle="Create and manage B2B companies"
       backAction={{
-        content: "Back to Dashboard",
-        url: "/app",
+        content: "Back to Companies",
+        url: "/app/manage-companies",
       }}
     >
       <Layout>

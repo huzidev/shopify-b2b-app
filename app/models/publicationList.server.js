@@ -1,5 +1,34 @@
 import db from "../db.server";
 
+// Get catalogs for publication creation dropdown
+export async function getCatalogsForPublication(shop) {
+  try {
+    const dbShop = await db.shop.findUnique({
+      where: { shopDomain: shop }
+    });
+
+    if (!dbShop) {
+      return [];
+    }
+
+    const catalogs = await db.catalog.findMany({
+      where: { shopId: dbShop.id },
+      include: {
+        company: true,
+        companyLocation: true
+      },
+      orderBy: {
+        title: 'asc'
+      }
+    });
+
+    return catalogs;
+  } catch (error) {
+    console.error("Error fetching catalogs for publication:", error);
+    return [];
+  }
+}
+
 export async function getPublications(shop) {
   try {
     const dbShop = await db.shop.findUnique({
@@ -13,7 +42,12 @@ export async function getPublications(shop) {
     const publications = await db.publication.findMany({
       where: { shopId: dbShop.id },
       include: {
-        catalog: true,
+        catalog: {
+          include: {
+            company: true,
+            companyLocation: true
+          }
+        },
         products: true
       },
       orderBy: {

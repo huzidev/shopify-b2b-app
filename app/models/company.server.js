@@ -34,6 +34,50 @@ export async function getCompanies(shop) {
   }
 }
 
+export async function getCompany(shop, companyId) {
+  try {
+    const dbShop = await prisma.shop.findUnique({
+      where: { shopDomain: shop }
+    });
+
+    if (!dbShop) {
+      return null;
+    }
+
+    const company = await prisma.company.findFirst({
+      where: { 
+        id: parseInt(companyId),
+        shopId: dbShop.id 
+      },
+      include: {
+        locations: {
+          include: {
+            catalogs: true
+          }
+        },
+        catalogs: {
+          include: {
+            priceList: true
+          }
+        },
+        orders: true,
+        _count: {
+          select: {
+            orders: true,
+            catalogs: true,
+            locations: true
+          }
+        }
+      }
+    });
+
+    return company;
+  } catch (error) {
+    console.error("Error fetching company:", error);
+    return null;
+  }
+}
+
 export async function createCompany({
   admin,
   shop,

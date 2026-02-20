@@ -1,75 +1,188 @@
-import { Link } from "react-router";
+import React, { useState } from "react";
+import { useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
-import { Page, Layout, Card, Button, Text, BlockStack } from "@shopify/polaris";
-  
+import { getDashboardStats, getRecentActivity } from "../models/dashboard.server";
+import {
+  Page,
+  Layout,
+  Card,
+  DataTable,
+  Badge,
+  Text,
+  TextField,
+  Select,
+  InlineStack,
+  BlockStack,
+  Box,
+  Divider,  
+} from "@shopify/polaris";
+import { SearchIcon } from "@shopify/polaris-icons";
+
 export const loader = async ({ request }) => {
-  await authenticate.admin(request);
-  return null;
+  const { session } = await authenticate.admin(request);
+  const shop = session.shop;
+  
+  const [stats, activity] = await Promise.all([
+    getDashboardStats(shop),
+    getRecentActivity(shop)
+  ]);
+
+  return { stats, activity };
 };
 
-export default function Index() {
+// Stat Card component mimicking Polaris Card with metric layout
+function StatCard({ label, value, trend, trendType }) {
   return (
-    <Page
-      title="B2B Orders Management"
-      subtitle="Manage your B2B orders, products, and companies"
-    >
-      <Layout>
-        <Layout.Section>
-          <BlockStack vertical spacing="loose">
-            {/* Product Management Card */}
-            <Card sectioned>
-              <BlockStack vertical spacing="tight">
-                <Text size="small" fontWeight="semibold">
-                  Product Management
-                </Text>
-                <Text subdued>
-                  Sync and manage your Shopify products for B2B ordering.
-                </Text>
-                <div style={{ textAlign: "right" }}>
-                  <Link to="/app/product-sync">
-                    <Button primary>Sync Products</Button>
-                  </Link>
-                </div>
-              </BlockStack>
-            </Card>
+    <Card>
+      <BlockStack gap="100">
+        <Text variant="bodyMd" tone="subdued">
+          {label}
+        </Text>
+        <Text variant="heading2xl" as="p" fontWeight="bold">
+          {value}
+        </Text>
+        <Text variant="bodySm" as="p" tone={trendType === "success" ? "success" : trendType === "warning" ? "caution" : "subdued"}>
+          {trend}
+        </Text>
+      </BlockStack>
+    </Card>
+  );
+}
 
-            {/* Company Management Card */}
-            <Card sectioned>
-              <BlockStack vertical spacing="tight">
-                <Text size="small" fontWeight="semibold">
-                  Company Management
-                </Text>
-                <Text subdued>
-                  Create and manage B2B companies and their ordering capabilities.
-                </Text>
-                <div style={{ textAlign: "right" }}>
-                  <Link to="/app/create-company">
-                    <Button>Create Company</Button>
-                  </Link>
-                </div>
-              </BlockStack>
-            </Card>
+const statusBadgeMap = {
+  Active: "success",
+  Draft: "warning",
+  Inactive: "enabled",
+};
 
-            {/* Catalog Management Card */}
-            <Card sectioned>
-              <BlockStack vertical spacing="tight">
-                <Text size="small" fontWeight="semibold">
-                  Catalog  Management
-                </Text>
-                <Text subdued>
-                  Create and manage B2B catalogs for your companies.
-                </Text>
-                <div style={{ textAlign: "right" }}>
-                  <Link to="/app/create-catalog">
-                    <Button>Create Catalog</Button>
-                  </Link>
+export default function Dashboard() {
+  const { stats, activity } = useLoaderData();
+  const [searchValue, setSearchValue] = useState("");
+  const [selectedFilter, setSelectedFilter] = useState("all");
+
+  const filteredData = activity.filter((row) => {
+    const matchesSearch =
+      searchValue === "" ||
+      row.action.toLowerCase().includes(searchValue.toLowerCase()) ||
+      row.entity.toLowerCase().includes(searchValue.toLowerCase());
+    const matchesFilter =
+      selectedFilter === "all" ||
+      row.entity.toLowerCase() === selectedFilter.toLowerCase();
+    return matchesSearch && matchesFilter;
+  });
+
+  const rows = filteredData.map((row) => [
+    <Text variant="bodyMd" tone="subdued">{row.time}</Text>,
+    <Text variant="bodyMd">{row.entity}</Text>,
+    <Text variant="bodyMd">{row.action}</Text>,
+    <Badge tone={statusBadgeMap[row.status]}>{row.status}</Badge>,
+  ]);
+
+  const filterOptions = [
+    { label: "All entities", value: "all" },
+    { label: "Company", value: "company" },
+    { label: "Location", value: "location" },
+    { label: "Catalog", value: "catalog" },
+    { label: "Publication", value: "publication" },
+  ];
+
+  return (
+    <Page title="Dashboard">
+      <BlockStack gap="500">
+        {/* Stats Row */}
+        <Layout>
+          <Layout.Section variant="oneQuarter">
+            <StatCard
+              label="Total companies"
+              value={stats.totalCompanies.toString()}
+              trend={stats.totalCompanies > 0 ? "Companies active" : "No companies yet"}
+              trendType={stats.totalCompanies > 0 ? "success" : "subdued"}
+            />
+          </Layout.Section>
+          <Layout.Section variant="oneQuarter">
+            <StatCard
+              label="Active catalogs"
+              value={stats.activeCatalogs.toString()}
+              trend={stats.activeCatalogs > 0 ? `${stats.activeCatalogs} active` : "No active catalogs"}
+              trendType={stats.activeCatalogs > 0 ? "success" : "subdued"}
+            />
+          </Layout.Section>
+          <Layout.Section variant="oneQuarter">
+            <StatCard
+              label="Locations"
+              value={stats.totalLocations.toString()}
+              trend={stats.totalLocations > 0 ? "Locations configured" : "No locations yet"}
+              trendType={stats.totalLocations > 0 ? "success" : "subdued"}
+            />
+          </Layout.Section>
+          <Layout.Section variant="oneQuarter">
+            <StatCard
+              label="Publications"
+              value={stats.totalPublications.toString()}
+              trend={stats.pendingPublications > 0 ? `${stats.pendingPublications} pending` : "All configured"}
+              trendType={stats.pendingPublications > 0 ? "warning" : "success"}
+            />
+          </Layout.Section>
+        </Layout>
+
+        {/* Recent Activity */}
+        <Card>
+          <BlockStack gap="400">
+            {/* Header Row */}
+            <InlineStack align="space-between" blockAlign="center">
+              <Text variant="headingMd" as="h2">
+                Recent activity
+              </Text>
+              <InlineStack gap="200">
+                <div style={{ width: 260 }}>
+                  <TextField
+                    prefix={<SearchIcon />}
+                    placeholder="Search activity..."
+                    value={searchValue}
+                    onChange={setSearchValue}
+                    autoComplete="off"
+                    clearButton
+                    onClearButtonClick={() => setSearchValue("")}
+                  />
                 </div>
-              </BlockStack>
-            </Card>
+                <div style={{ width: 160 }}>
+                  <Select
+                    options={filterOptions}
+                    value={selectedFilter}
+                    onChange={setSelectedFilter}
+                  />
+                </div>
+              </InlineStack>
+            </InlineStack>
+
+            <Divider />
+
+            {/* Data Table */}
+            <DataTable
+              columnContentTypes={["text", "text", "text", "text"]}
+              headings={[
+                <Text variant="bodySm" fontWeight="semibold" tone="subdued">Time</Text>,
+                <Text variant="bodySm" fontWeight="semibold" tone="subdued">Entity</Text>,
+                <Text variant="bodySm" fontWeight="semibold" tone="subdued">Action</Text>,
+                <Text variant="bodySm" fontWeight="semibold" tone="subdued">Status</Text>,
+              ]}
+              rows={rows}
+              hoverable
+            />
+
+            {rows.length === 0 && (
+              <Box padding="800">
+                <BlockStack align="center" inlineAlign="center" gap="200">
+                  <Text variant="bodyMd" tone="subdued">
+                    No activity found matching your search.
+                  </Text>
+                </BlockStack>
+              </Box>
+            )}
           </BlockStack>
-        </Layout.Section>
-      </Layout>
+        </Card>
+      </BlockStack>
     </Page>
   );
 }

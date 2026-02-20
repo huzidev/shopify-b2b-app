@@ -1,5 +1,80 @@
 import prisma from "../db.server";
 
+// Get all catalogs for a shop
+export async function getCatalogs(shop) {
+  try {
+    const dbShop = await prisma.shop.findUnique({
+      where: { shopDomain: shop }
+    });
+
+    if (!dbShop) {
+      return [];
+    }
+
+    const catalogs = await prisma.catalog.findMany({
+      where: { shopId: dbShop.id },
+      include: {
+        company: true,
+        companyLocation: true,
+        priceList: true,
+        publications: {
+          include: {
+            products: true
+          }
+        },
+        _count: {
+          select: {
+            publications: true
+          }
+        }
+      },
+      orderBy: {
+        createdAt: 'desc'
+      }
+    });
+
+    return catalogs;
+  } catch (error) {
+    console.error("Error fetching catalogs:", error);
+    return [];
+  }
+}
+
+// Get a single catalog with details
+export async function getCatalog(shop, catalogId) {
+  try {
+    const dbShop = await prisma.shop.findUnique({
+      where: { shopDomain: shop }
+    });
+
+    if (!dbShop) {
+      return null;
+    }
+
+    const catalog = await prisma.catalog.findFirst({
+      where: { 
+        id: parseInt(catalogId),
+        shopId: dbShop.id 
+      },
+      include: {
+        company: true,
+        companyLocation: true,
+        priceList: true,
+        publications: {
+          include: {
+            products: true
+          }
+        }
+      }
+    });
+
+    return catalog;
+  } catch (error) {
+    console.error("Error fetching catalog:", error);
+    return null;
+  }
+}
+
 export async function createCatalog({
   admin,
   shop,
