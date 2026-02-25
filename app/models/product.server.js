@@ -156,3 +156,178 @@ export async function getProductStats(shop) {
     return { productCount: 0, variantCount: 0 };
   }
 }
+
+export async function getAllDbProducts(shop) {
+  const shopRecord = await db.shop.findUnique({
+    where: { shopDomain: shop },
+  });
+
+  if (!shopRecord) return [];
+
+  return await db.product.findMany({
+    where: { shopId: shopRecord.id },
+    select: {
+      shopifyId: true,
+    },
+  });
+}
+
+export async function syncSingleProduct(admin, shop, productId) {
+  const shopRecord = await db.shop.findUnique({
+    where: { shopDomain: shop },
+  });
+
+  const response = await admin.graphql(
+    `#graphql
+      query getProduct($id: ID!) {
+        product(id: $id) {
+          id
+          title
+          handle
+          status
+          variants(first: 20) {
+            edges {
+              node {
+                id
+                sku
+                title
+                price
+                inventoryQuantity
+              }
+            }
+          }
+        }
+      }`,
+    {
+      variables: { id: productId },
+    }
+  );
+
+  const json = await response.json();
+  const productNode = json.data.product;
+
+  const product = await db.product.upsert({
+    where: {
+      shopifyId_shopId: {
+        shopifyId: productNode.id,
+        shopId: shopRecord.id,
+      },
+    },
+    update: {
+      title: productNode.title,
+      handle: productNode.handle,
+      status: productNode.status,
+    },
+    create: {
+      shopifyId: productNode.id,
+      shopId: shopRecord.id,
+      title: productNode.title,
+      handle: productNode.handle,
+      status: productNode.status,
+    },
+  });
+
+  for (const variantEdge of productNode.variants.edges) {
+    const variantNode = variantEdge.node;
+
+    await db.variant.upsert({
+      where: {
+        shopifyId_shopId: {
+          shopifyId: variantNode.id,
+          shopId: shopRecord.id,
+        },
+      },
+      update: {
+        sku: variantNode.sku,
+        title: variantNode.title,
+        price: variantNode.price,
+        inventory: variantNode.inventoryQuantity,
+      },
+      create: {
+        shopifyId: variantNode.id,
+        shopId: shopRecord.id,
+        productId: product.id,
+        sku: variantNode.sku,
+        title: variantNode.title,
+        price: variantNode.price,
+        inventory: variantNode.inventoryQuantity,
+      },
+    });
+  }
+
+  return { success: true };
+}
+
+export async function getProductsWithSyncStatus(admin, shop) {
+  try {
+    // Get products from Shopify
+    const shopifyProducts = await getAllProductsFromShopify(admin);
+    
+    // Get synced product IDs from database
+    const shopRecord = await db.shop.findUnique({
+      where: { shopDomain: shop },
+    });
+
+    if (!shopRecord) {
+      // If no shop record, all products are unsynced
+      return shopifyProducts.edges.map((edge) => ({
+        ...edge.node,
+        syncStatus: "NOT_SYNCED",
+      }));
+    }
+
+    const syncedProducts = await db.product.findMany({
+      where: { shopId: shopRecord.id },
+      select: { shopifyId: true },
+    });
+
+    const syncedProductIds = new Set(syncedProducts.map(p => p.shopifyId));
+
+    // Map products with sync status
+    return shopifyProducts.edges.map((edge) => {
+      const product = edge.node;
+      return {
+        ...product,
+        syncStatus: syncedProductIds.has(product.id) ? "SYNCED" : "NOT_SYNCED",
+      };
+    });
+  } catch (error) {
+    console.error("Error getting products with sync status:", error);
+    return [];
+  }
+}
+
+export async function removeProductFromDatabase(shop, productId) {
+  try {
+    const shopRecord = await db.shop.findUnique({
+      where: { shopDomain: shop },
+    });
+
+    if (!shopRecord) {
+      return { success: false, error: "Shop not found" };
+    }
+
+    // First remove all variants of the product
+    await db.variant.deleteMany({
+      where: {
+        product: {
+          shopifyId: productId,
+          shopId: shopRecord.id,
+        },
+      },
+    });
+
+    // Then remove the product
+    const result = await db.product.deleteMany({
+      where: {
+        shopifyId: productId,
+        shopId: shopRecord.id,
+      },
+    });
+
+    return { success: true, deletedCount: result.count };
+  } catch (error) {
+    console.error("Error removing product:", error);
+    return { success: false, error: error.message };
+  }
+}
