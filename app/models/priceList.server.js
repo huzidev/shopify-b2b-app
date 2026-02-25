@@ -223,3 +223,90 @@ export async function updatePriceList({
     };
   }
 }
+
+export async function deletePriceList({ admin, shop, priceListId }) {
+  try {
+    const dbShop = await db.shop.findUnique({
+      where: { shopDomain: shop }
+    });
+
+    if (!dbShop) {
+      return { success: false, error: "Shop not found" };
+    }
+
+    // First delete from Shopify
+    const deleteMutation = `
+      mutation priceListDelete($id: ID!) {
+        priceListDelete(id: $id) {
+          deletedId
+          userErrors {
+            field
+            message
+          }
+        }
+      }
+    `;
+
+    const response = await admin.graphql(deleteMutation, {
+      variables: {
+        id: priceListId
+      }
+    });
+
+    const deleteResponse = await response.json();
+    
+    if (deleteResponse.data?.priceListDelete?.userErrors?.length > 0) {
+      const error = deleteResponse.data.priceListDelete.userErrors[0].message;
+      return { success: false, error };
+    }
+
+    // Then delete from our database
+    await db.priceList.delete({
+      where: {
+        shopifyId_shopId: {
+          shopifyId: priceListId,
+          shopId: dbShop.id
+        }
+      }
+    });
+
+    return { success: true };
+
+  } catch (error) {
+    console.error("Error deleting price list:", error);
+    return { 
+      success: false, 
+      error: error.message 
+    };
+  }
+}
+
+export async function bulkDeletePriceLists({ admin, shop, priceListIds }) {
+  try {
+    const results = [];
+    let successCount = 0;
+    let errors = [];
+
+    for (const priceListId of priceListIds) {
+      const result = await deletePriceList({ admin, shop, priceListId });
+      if (result.success) {
+        successCount++;
+      } else {
+        errors.push(`Failed to delete ${priceListId}: ${result.error}`);
+      }
+    }
+
+    return {
+      success: true,
+      deletedCount: successCount,
+      errors: errors.length > 0 ? errors : null
+    };
+
+  } catch (error) {
+    console.error("Error bulk deleting price lists:", error);
+    return { 
+      success: false, 
+      error: error.message 
+    };
+  }
+}

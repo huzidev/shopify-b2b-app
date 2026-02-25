@@ -1,22 +1,26 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useFetcher, useLoaderData, useActionData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
-import { getPriceLists, createPriceList, updatePriceList } from "../models/priceList.server";
+import { getPriceLists, createPriceList, updatePriceList, deletePriceList, bulkDeletePriceLists } from "../models/priceList.server";
 import {
   Page,
   Layout,
-  Card,
+  LegacyCard,
   Text,
   BlockStack,
-  DataTable,
+  IndexTable,
+  IndexFilters,
   Button,
   Modal,
   TextField,
   Select,
   Badge,
   InlineStack,
-  Banner
+  Banner,
+  useIndexResourceState,
+  ChoiceList,
+  useBreakpoints,
 } from "@shopify/polaris";
 import { useAppBridge } from "@shopify/app-bridge-react";
 
@@ -63,6 +67,26 @@ export const action = async ({ request }) => {
       adjustmentValue: parseFloat(adjustmentValue)
     });
   }
+
+  if (actionType === "delete") {
+    const priceListId = formData.get("priceListId");
+    
+    return await deletePriceList({
+      admin,
+      shop: session.shop,
+      priceListId
+    });
+  }
+
+  if (actionType === "bulkDelete") {
+    const priceListIds = JSON.parse(formData.get("priceListIds"));
+    
+    return await bulkDeletePriceLists({
+      admin,
+      shop: session.shop,
+      priceListIds
+    });
+  }
   
   return { success: false, error: "Unknown action" };
 };
@@ -74,7 +98,9 @@ export default function AppPriceList() {
   const isLoading = fetcher.state === "submitting";
 
   const [modalOpen, setModalOpen] = useState(false);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [editingPriceList, setEditingPriceList] = useState(null);
+  const [deletingPriceList, setDeletingPriceList] = useState(null);
   const [formData, setFormData] = useState({
     name: "",
     currency: "USD",
@@ -82,11 +108,148 @@ export default function AppPriceList() {
     adjustmentValue: "0"
   });
 
+  // Search and filter state
+  const [queryValue, setQueryValue] = useState('');
+  const [adjustmentTypeFilter, setAdjustmentTypeFilter] = useState(undefined);
+  const [sortSelected, setSortSelected] = useState(['name asc']);
+
+  const resourceName = {
+    singular: 'price list',
+    plural: 'price lists',
+  };
+
+  // Filter and search logic
+  const filteredPriceLists = priceLists?.filter((priceList) => {
+    const matchesQuery = queryValue === '' || 
+      priceList.name.toLowerCase().includes(queryValue.toLowerCase()) ||
+      priceList.currency.toLowerCase().includes(queryValue.toLowerCase());
+    
+    const matchesAdjustmentType = !adjustmentTypeFilter || adjustmentTypeFilter.length === 0 ||
+      adjustmentTypeFilter.includes(priceList.adjustmentType?.toLowerCase().replace('_', ' '));
+    
+    return matchesQuery && matchesAdjustmentType;
+  }) || [];
+
+  // Sort price lists
+  const sortedPriceLists = [...filteredPriceLists].sort((a, b) => {
+    const [sortKey, direction] = sortSelected[0].split(' ');
+    const isAscending = direction === 'asc';
+    
+    let aValue, bValue;
+    switch (sortKey) {
+      case 'name':
+        aValue = a.name.toLowerCase();
+        bValue = b.name.toLowerCase();
+        break;
+      case 'currency':
+        aValue = a.currency.toLowerCase();
+        bValue = b.currency.toLowerCase();
+        break;
+      case 'adjustmentType':
+        aValue = a.adjustmentType || '';
+        bValue = b.adjustmentType || '';
+        break;
+      case 'adjustmentValue':
+        aValue = a.adjustmentValue || 0;
+        bValue = b.adjustmentValue || 0;
+        break;
+      default:
+        aValue = a.name.toLowerCase();
+        bValue = b.name.toLowerCase();
+    }
+    
+    if (aValue < bValue) return isAscending ? -1 : 1;
+    if (aValue > bValue) return isAscending ? 1 : -1;
+    return 0;
+  });
+
+  const { selectedResources, allResourcesSelected, handleSelectionChange } =
+    useIndexResourceState(sortedPriceLists);
+
+  const selectedPriceLists = sortedPriceLists.filter(priceList => selectedResources.includes(priceList.shopifyId));
+
+  // Filter handlers
+  const handleFiltersQueryChange = useCallback(
+    (value) => setQueryValue(value),
+    [],
+  );
+  
+  const handleAdjustmentTypeChange = useCallback(
+    (value) => setAdjustmentTypeFilter(value),
+    [],
+  );
+  
+  const handleQueryValueRemove = useCallback(() => setQueryValue(''), []);
+  const handleAdjustmentTypeRemove = useCallback(() => setAdjustmentTypeFilter(undefined), []);
+  
+  const handleFiltersClearAll = useCallback(() => {
+    handleQueryValueRemove();
+    handleAdjustmentTypeRemove();
+  }, [handleQueryValueRemove, handleAdjustmentTypeRemove]);
+
+  // Sort options
+  const sortOptions = [
+    {label: 'Name', value: 'name asc', directionLabel: 'A-Z'},
+    {label: 'Name', value: 'name desc', directionLabel: 'Z-A'},
+    {label: 'Currency', value: 'currency asc', directionLabel: 'A-Z'},
+    {label: 'Currency', value: 'currency desc', directionLabel: 'Z-A'},
+    {label: 'Adjustment Type', value: 'adjustmentType asc', directionLabel: 'Decrease First'},
+    {label: 'Adjustment Type', value: 'adjustmentType desc', directionLabel: 'Increase First'},
+    {label: 'Adjustment Value', value: 'adjustmentValue asc', directionLabel: 'Low to High'},
+    {label: 'Adjustment Value', value: 'adjustmentValue desc', directionLabel: 'High to Low'},
+  ];
+
+  // Filters
+  const filters = [
+    {
+      key: 'adjustmentType',
+      label: 'Adjustment type',
+      filter: (
+        <ChoiceList
+          title="Adjustment type"
+          titleHidden
+          choices={[
+            {label: 'Percentage Increase', value: 'percentage increase'},
+            {label: 'Percentage Decrease', value: 'percentage decrease'},
+          ]}
+          selected={adjustmentTypeFilter || []}
+          onChange={handleAdjustmentTypeChange}
+          allowMultiple
+        />
+      ),
+      shortcut: true,
+    },
+  ];
+
+  // Applied filters
+  const appliedFilters = [];
+  if (adjustmentTypeFilter && adjustmentTypeFilter.length > 0) {
+    const key = 'adjustmentType';
+    appliedFilters.push({
+      key,
+      label: `Adjustment type: ${adjustmentTypeFilter.join(', ')}`,
+      onRemove: handleAdjustmentTypeRemove,
+    });
+  }
+
   useEffect(() => {
     if (fetcher.data?.success) {
-      shopify.toast.show(editingPriceList ? "Price list updated!" : "Price list created!");
+      let message = "Operation completed successfully!";
+      if (fetcher.data.deletedCount) {
+        message = `Successfully deleted ${fetcher.data.deletedCount} price list(s)!`;
+      } else if (editingPriceList) {
+        message = "Price list updated!";
+      } else if (deletingPriceList) {
+        message = "Price list deleted!";
+      } else {
+        message = "Price list created!";
+      }
+      
+      shopify.toast.show(message);
       setModalOpen(false);
+      setDeleteModalOpen(false);
       setEditingPriceList(null);
+      setDeletingPriceList(null);
       setFormData({
         name: "",
         currency: "USD",
@@ -96,7 +259,7 @@ export default function AppPriceList() {
     } else if (fetcher.data?.error) {
       shopify.toast.show(`Error: ${fetcher.data.error}`, { isError: true });
     }
-  }, [fetcher.data, shopify, editingPriceList]);
+  }, [fetcher.data, shopify, editingPriceList, deletingPriceList]);
 
   const handleSubmit = () => {
     const submitData = {
@@ -120,6 +283,28 @@ export default function AppPriceList() {
       adjustmentValue: priceList.adjustmentValue ? Number(priceList.adjustmentValue).toString() : "0"
     });
     setModalOpen(true);
+  };
+
+  const handleDelete = (priceList) => {
+    setDeletingPriceList(priceList);
+    setDeleteModalOpen(true);
+  };
+
+  const handleBulkDelete = () => {
+    const formData = {
+      actionType: "bulkDelete",
+      priceListIds: JSON.stringify(selectedPriceLists.map(pl => pl.shopifyId))
+    };
+    fetcher.submit(formData, { method: "POST" });
+  };
+
+  const handleDeleteConfirm = () => {
+    if (deletingPriceList) {
+      fetcher.submit({
+        actionType: "delete",
+        priceListId: deletingPriceList.shopifyId
+      }, { method: "POST" });
+    }
   };
 
   const handleCreate = () => {
@@ -152,29 +337,18 @@ export default function AppPriceList() {
   };
 
   console.log("SW what is priceLists?", priceLists);
-  
 
-  const rows = priceLists?.map(priceList => {
-    const adjustmentPercent = priceList.adjustmentValue?.d?.[0] ?? 0;
-
-    return [
-      priceList.name,
-      priceList.currency,
-      priceList.adjustmentType ? (
-        <Badge 
-          status={priceList.adjustmentType.includes("INCREASE") ? "success" : "attention"}
-        >
-          {adjustmentPercent}%
-        </Badge>
-      ) : "No adjustment",
-      <Button onClick={() => handleEdit(priceList)} size="slim">
-        Edit
-      </Button>
-    ];
-  }) || [];
+  function isEmpty(value) {
+    if (Array.isArray(value)) {
+      return value.length === 0;
+    } else {
+      return value === '' || value == null;
+    }
+  }
 
 
   return (
+    <>
     <Page
       title="Price Lists"
       subtitle="Manage price lists for B2B catalogs"
@@ -186,6 +360,14 @@ export default function AppPriceList() {
         content: "Create Price List",
         onAction: handleCreate
       }}
+      secondaryActions={[
+        {
+          content: `Delete Selected (${selectedPriceLists.length})`,
+          onAction: handleBulkDelete,
+          disabled: selectedPriceLists.length === 0 || isLoading,
+          destructive: true,
+        },
+      ]}
     >
       <Layout>
         <Layout.Section>
@@ -196,21 +378,103 @@ export default function AppPriceList() {
               </Banner>
             )}
 
-            <Card>
-              <DataTable
-                columnContentTypes={['text', 'text', 'text', 'text']}
-                headings={['Name', 'Currency', 'Price Adjustment', 'Actions']}
-                rows={rows}
-                footerContent={
-                  priceLists?.length === 0 ? 
-                    `No price lists found. Create your first price list to get started.` :
-                    `Showing ${priceLists?.length} price list${priceLists?.length === 1 ? '' : 's'}`
-                }
+            <LegacyCard>
+              <IndexFilters
+                sortOptions={sortOptions}
+                sortSelected={sortSelected}
+                queryValue={queryValue}
+                queryPlaceholder="Search price lists..."
+                onQueryChange={handleFiltersQueryChange}
+                onQueryClear={() => setQueryValue('')}
+                onSort={setSortSelected}
+                filters={filters}
+                appliedFilters={appliedFilters}
+                onClearAll={handleFiltersClearAll}
               />
-            </Card>
+              <IndexTable
+                condensed={useBreakpoints().smDown}
+                resourceName={resourceName}
+                itemCount={sortedPriceLists.length}
+                selectedItemsCount={
+                  allResourcesSelected ? 'All' : selectedResources.length
+                }
+                onSelectionChange={handleSelectionChange}
+                headings={[
+                  { title: 'Name' },
+                  { title: 'Currency' },
+                  { title: 'Adjustment Type' },
+                  { title: 'Price Adjustment' },
+                  { title: 'Actions' },
+                ]}
+              >
+                {sortedPriceLists.map((priceList, index) => {
+                  const adjustmentPercent = Number(priceList.adjustmentValue || 0);
+                  
+                  return (
+                    <IndexTable.Row
+                      id={priceList.shopifyId}
+                      key={priceList.shopifyId}
+                      selected={selectedResources.includes(priceList.shopifyId)}
+                      position={index}
+                    >
+                      <IndexTable.Cell>
+                        <Text variant="bodyMd" fontWeight="medium" as="span">
+                          {priceList.name}
+                        </Text>
+                      </IndexTable.Cell>
+                      <IndexTable.Cell>{priceList.currency}</IndexTable.Cell>
+                      <IndexTable.Cell>
+                        {priceList.adjustmentType ? (
+                          <Badge tone={priceList.adjustmentType.includes("INCREASE") ? "success" : "caution"}>
+                            {priceList.adjustmentType.includes("INCREASE") ? "Increase" : "Decrease"}
+                          </Badge>
+                        ) : (
+                          <Badge tone="info">None</Badge>
+                        )}
+                      </IndexTable.Cell>
+                      <IndexTable.Cell>
+                        {priceList.adjustmentType ? (
+                          <Text variant="bodyMd" as="span">
+                            {adjustmentPercent}%
+                          </Text>
+                        ) : (
+                          "No adjustment"
+                        )}
+                      </IndexTable.Cell>
+                      <IndexTable.Cell>
+                        <InlineStack gap="200">
+                          <Button onClick={() => handleEdit(priceList)} size="slim">
+                            Edit
+                          </Button>
+                          <Button 
+                            onClick={() => handleDelete(priceList)} 
+                            size="slim" 
+                            tone="critical"
+                            disabled={isLoading}
+                          >
+                            Delete
+                          </Button>
+                        </InlineStack>
+                      </IndexTable.Cell>
+                    </IndexTable.Row>
+                  );
+                })}
+              </IndexTable>
+              {sortedPriceLists.length === 0 && (
+                <div style={{ padding: '40px 0', textAlign: 'center' }}>
+                  <Text variant="bodyMd" tone="subdued">
+                    {queryValue || adjustmentTypeFilter?.length > 0 
+                      ? "No price lists found matching your search."
+                      : "No price lists found. Create your first price list to get started."
+                    }
+                  </Text>
+                </div>
+              )}
+            </LegacyCard>
           </BlockStack>
         </Layout.Section>
       </Layout>
+    </Page>
 
       <Modal
         open={modalOpen}
@@ -297,9 +561,34 @@ export default function AppPriceList() {
           </BlockStack>
         </Modal.Section>
       </Modal>
-    </Page>
-  );
-}
+
+      {/* Delete Confirmation Modal */}
+      <Modal
+        open={deleteModalOpen}
+        onClose={() => setDeleteModalOpen(false)}
+        title="Delete Price List"
+        primaryAction={{
+          content: "Delete",
+          onAction: handleDeleteConfirm,
+          loading: isLoading,
+          destructive: true
+        }}
+        secondaryActions={[
+          {
+            content: "Cancel",
+            onAction: () => setDeleteModalOpen(false)
+          }
+        ]}
+      >
+        <Modal.Section>
+          <Text as="p">
+            Are you sure you want to delete "{deletingPriceList?.name}"? This action cannot be undone and will remove the price list from both your database and Shopify.
+          </Text>
+        </Modal.Section>
+      </Modal>
+    </>
+    );
+  }
 
 export const headers = (headersArgs) => {
   return boundary.headers(headersArgs);

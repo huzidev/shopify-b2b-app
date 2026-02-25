@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useFetcher, useLoaderData, Link, useActionData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
@@ -13,15 +13,20 @@ import {
   Page,
   Layout,
   Card,
+  LegacyCard,
   Button,
   Text,
   BlockStack,
   InlineStack,
   Badge,
   Banner,
-  DataTable,
+  IndexTable,
+  IndexFilters,
   Modal,
   Box,
+  useIndexResourceState,
+  ChoiceList,
+  useBreakpoints,
 } from "@shopify/polaris";
 import { useAppBridge } from "@shopify/app-bridge-react";
 
@@ -42,9 +47,58 @@ export const action = async ({ request }) => {
   const { admin, session } = await authenticate.admin(request);
   const formData = await request.formData();
   const productId = formData.get("productId");
+  const productIds = formData.get("productIds");
   const actionType = formData.get("actionType");
 
   try {
+    // Handle bulk operations
+    if (actionType === "bulkRemove" && productIds) {
+      const ids = JSON.parse(productIds);
+      let successCount = 0;
+      let errors = [];
+      
+      for (const id of ids) {
+        const result = await removeProductFromDatabase(session.shop, id);
+        if (result.success) {
+          successCount += result.deletedCount || 1;
+        } else {
+          errors.push(`Failed to remove product ${id}: ${result.error}`);
+        }
+      }
+      
+      const updatedStats = await getProductStats(session.shop);
+      return {
+        success: true,
+        deletedCount: successCount,
+        errors: errors.length > 0 ? errors : null,
+        updatedStats,
+      };
+    }
+
+    if (actionType === "bulkSync" && productIds) {
+      const ids = JSON.parse(productIds);
+      let successCount = 0;
+      let errors = [];
+      
+      for (const id of ids) {
+        const result = await syncSingleProduct(admin, session.shop, id);
+        if (result.success) {
+          successCount++;
+        } else {
+          errors.push(`Failed to sync product ${id}`);
+        }
+      }
+      
+      const updatedStats = await getProductStats(session.shop);
+      return {
+        success: true,
+        syncedCount: successCount,
+        errors: errors.length > 0 ? errors : null,
+        updatedStats,
+      };
+    }
+
+    // Handle single operations
     if (actionType === "remove" && productId) {
       const result = await removeProductFromDatabase(session.shop, productId);
       if (result.success) {
@@ -102,8 +156,136 @@ export default function AppProductSync() {
   const fetcher = useFetcher();
   const shopify = useAppBridge();
   const [currentStats, setCurrentStats] = useState(stats);
-  const [modalState, setModalState] = useState({ isOpen: false, type: null, productId: null, productTitle: null });
+  const [modalState, setModalState] = useState({ isOpen: false, type: null, productId: null, productIds: null, productTitle: null });
   const isLoading = fetcher.state === "submitting";
+
+  // Search and filter state
+  const [queryValue, setQueryValue] = useState('');
+  const [syncStatus, setSyncStatus] = useState(undefined);
+  const [sortSelected, setSortSelected] = useState(['title asc']);
+
+  const resourceName = {
+    singular: 'product',
+    plural: 'products',
+  };
+
+  // Filter and search logic
+  const filteredProducts = (productsWithStatus || []).filter((product) => {
+    const matchesQuery = queryValue === '' || 
+      product.title.toLowerCase().includes(queryValue.toLowerCase());
+    
+    const matchesSyncStatus = !syncStatus || syncStatus.length === 0 ||
+      syncStatus.includes(product.syncStatus.toLowerCase().replace('_', ' '));
+    
+    return matchesQuery && matchesSyncStatus;
+  });
+
+  // Sort products
+  const sortedProducts = [...filteredProducts].sort((a, b) => {
+    const [sortKey, direction] = sortSelected[0].split(' ');
+    const isAscending = direction === 'asc';
+    
+    let aValue, bValue;
+    switch (sortKey) {
+      case 'title':
+        aValue = a.title.toLowerCase();
+        bValue = b.title.toLowerCase();
+        break;
+      case 'status':
+        aValue = a.status.toLowerCase();
+        bValue = b.status.toLowerCase();
+        break;
+      case 'syncStatus':
+        aValue = a.syncStatus;
+        bValue = b.syncStatus;
+        break;
+      default:
+        aValue = a.title.toLowerCase();
+        bValue = b.title.toLowerCase();
+    }
+    
+    if (aValue < bValue) return isAscending ? -1 : 1;
+    if (aValue > bValue) return isAscending ? 1 : -1;
+    return 0;
+  });
+
+  const { selectedResources, allResourcesSelected, handleSelectionChange } =
+    useIndexResourceState(sortedProducts);
+
+  const hasSelection = selectedResources.length > 0;
+  const selectedProducts = (sortedProducts || []).filter(product => selectedResources.includes(product.id));
+  const selectedSyncedProducts = (selectedProducts || []).filter(product => product.syncStatus === 'SYNCED');
+  const selectedUnsyncedProducts = (selectedProducts || []).filter(product => product.syncStatus === 'NOT_SYNCED');
+
+  // Filter handlers
+  const handleFiltersQueryChange = useCallback(
+    (value) => setQueryValue(value),
+    [],
+  );
+  
+  const handleSyncStatusChange = useCallback(
+    (value) => setSyncStatus(value),
+    [],
+  );
+  
+  const handleQueryValueRemove = useCallback(() => setQueryValue(''), []);
+  const handleSyncStatusRemove = useCallback(() => setSyncStatus(undefined), []);
+  
+  const handleFiltersClearAll = useCallback(() => {
+    handleQueryValueRemove();
+    handleSyncStatusRemove();
+  }, [handleQueryValueRemove, handleSyncStatusRemove]);
+
+  // Sort options
+  const sortOptions = [
+    {label: 'Title', value: 'title asc', directionLabel: 'A-Z'},
+    {label: 'Title', value: 'title desc', directionLabel: 'Z-A'},
+    {label: 'Status', value: 'status asc', directionLabel: 'A-Z'},
+    {label: 'Status', value: 'status desc', directionLabel: 'Z-A'},
+    {label: 'Sync Status', value: 'syncStatus asc', directionLabel: 'Not Synced First'},
+    {label: 'Sync Status', value: 'syncStatus desc', directionLabel: 'Synced First'},
+  ];
+
+  // Filters
+  const filters = [
+    {
+      key: 'syncStatus',
+      label: 'Sync status',
+      filter: (
+        <ChoiceList
+          title="Sync status"
+          titleHidden
+          choices={[
+            {label: 'Synced', value: 'synced'},
+            {label: 'Not synced', value: 'not synced'},
+          ]}
+          selected={syncStatus || []}
+          onChange={handleSyncStatusChange}
+          allowMultiple
+        />
+      ),
+      shortcut: true,
+    },
+  ];
+
+  // Applied filters
+  const appliedFilters = [];
+  if (syncStatus && syncStatus.length > 0) {
+    const key = 'syncStatus';
+    appliedFilters.push({
+      key,
+      label: `Sync status: ${syncStatus.join(', ')}`,
+      onRemove: handleSyncStatusRemove,
+    });
+  }
+
+  function isEmpty(value) {
+    if (Array.isArray(value)) {
+      return value.length === 0;
+    } else {
+      return value === '' || value == null;
+    }
+  }
 
   useEffect(() => {
     if (fetcher.data?.success) {
@@ -122,7 +304,7 @@ export default function AppProductSync() {
       }
       
       // Close modal after successful action
-      setModalState({ isOpen: false, type: null, productId: null, productTitle: null });
+      setModalState({ isOpen: false, type: null, productId: null, productIds: null, productTitle: null });
     } else if (fetcher.data?.error) {
       shopify.toast.show(`Error: ${fetcher.data.error}`, {
         isError: true,
@@ -137,8 +319,16 @@ export default function AppProductSync() {
   const handleModalConfirm = () => {
     const formData = {
       actionType: modalState.type,
-      productId: modalState.productId,
     };
+
+    if (modalState.productId) {
+      formData.productId = modalState.productId;
+    }
+
+    if (modalState.productIds) {
+      formData.productIds = JSON.stringify(modalState.productIds);
+    }
+
     fetcher.submit(formData, { method: "POST" });
   };
 
@@ -147,7 +337,18 @@ export default function AppProductSync() {
       isOpen: true,
       type,
       productId,
+      productIds: null,
       productTitle,
+    });
+  };
+
+  const openBulkModal = (type, productIds) => {
+    setModalState({
+      isOpen: true,
+      type,
+      productId: null,
+      productIds,
+      productTitle: null,
     });
   };
 
@@ -156,8 +357,17 @@ export default function AppProductSync() {
       isOpen: false,
       type: null,
       productId: null,
+      productIds: null,
       productTitle: null,
     });
+  };
+
+  const handleBulkRemove = () => {
+    openBulkModal("bulkRemove", (selectedSyncedProducts || []).map(p => p.id));
+  };
+
+  const handleBulkSync = () => {
+    openBulkModal("bulkSync", (selectedUnsyncedProducts || []).map(p => p.id));
   };
 
   return (
@@ -175,6 +385,19 @@ export default function AppProductSync() {
           loading: isLoading,
           disabled: isLoading,
         }}
+        secondaryActions={[
+          {
+            content: `Remove Selected (${(selectedSyncedProducts || []).length})`,
+            onAction: handleBulkRemove,
+            disabled: (selectedSyncedProducts || []).length === 0 || isLoading,
+            destructive: true,
+          },
+          {
+            content: `Sync Selected (${(selectedUnsyncedProducts || []).length})`,
+            onAction: handleBulkSync,
+            disabled: (selectedUnsyncedProducts || []).length === 0 || isLoading,
+          },
+        ]}
       >
       <Layout>
         <Layout.Section>
@@ -224,45 +447,78 @@ export default function AppProductSync() {
             </Card>
 
             {/* Product Table */}
-            <Card>
-              <BlockStack spacing="tight">
-                <Text size="medium" fontWeight="semibold">
-                  Shopify Products
-                </Text>
-
-                <DataTable
-                  columnContentTypes={["text", "text", "text", "text"]}
-                  headings={["Title", "Status", "Sync Status", "Action"]}
-                  rows={productsWithStatus.map((product) => [
-                    product.title,
-                    product.status,
-                    product.syncStatus === "SYNCED" ? (
-                      <Badge tone="success">SYNCED</Badge>
-                    ) : (
-                      <Badge tone="critical">NOT SYNCED</Badge>
-                    ),
-                    product.syncStatus === "SYNCED" ? (
-                      <Button
-                        size="slim"
-                        tone="critical"
-                        onClick={() => openModal("remove", product.id, product.title)}
-                        disabled={isLoading}
-                      >
-                        Remove
-                      </Button>
-                    ) : (
-                      <Button
-                        size="slim"
-                        onClick={() => openModal("sync", product.id, product.title)}
-                        disabled={isLoading}
-                      >
-                        Sync Now
-                      </Button>
-                    ),
-                  ])}
-                />
-              </BlockStack>
-            </Card>
+            <LegacyCard>
+              <IndexFilters
+                sortOptions={sortOptions}
+                sortSelected={sortSelected}
+                queryValue={queryValue}
+                queryPlaceholder="Search products..."
+                onQueryChange={handleFiltersQueryChange}
+                onQueryClear={() => setQueryValue('')}
+                onSort={setSortSelected}
+                filters={filters}
+                appliedFilters={appliedFilters}
+                onClearAll={handleFiltersClearAll}
+              />
+              <IndexTable
+                condensed={useBreakpoints().smDown}
+                resourceName={resourceName}
+                itemCount={(sortedProducts || []).length}
+                selectedItemsCount={
+                  allResourcesSelected ? 'All' : selectedResources.length
+                }
+                onSelectionChange={handleSelectionChange}
+                headings={[
+                  { title: 'Title' },
+                  { title: 'Status' },
+                  { title: 'Sync Status' },
+                  { title: 'Action' },
+                ]}
+              >
+                {(sortedProducts || []).map((product, index) => (
+                  <IndexTable.Row
+                    id={product.id}
+                    key={product.id}
+                    selected={selectedResources.includes(product.id)}
+                    position={index}
+                  >
+                    <IndexTable.Cell>
+                      <Text variant="bodyMd" fontWeight="medium" as="span">
+                        {product.title}
+                      </Text>
+                    </IndexTable.Cell>
+                    <IndexTable.Cell>{product.status}</IndexTable.Cell>
+                    <IndexTable.Cell>
+                      {product.syncStatus === "SYNCED" ? (
+                        <Badge tone="success">SYNCED</Badge>
+                      ) : (
+                        <Badge tone="critical">NOT SYNCED</Badge>
+                      )}
+                    </IndexTable.Cell>
+                    <IndexTable.Cell>
+                      {product.syncStatus === "SYNCED" ? (
+                        <Button
+                          size="slim"
+                          tone="critical"
+                          onClick={() => openModal("remove", product.id, product.title)}
+                          disabled={isLoading}
+                        >
+                          Remove
+                        </Button>
+                      ) : (
+                        <Button
+                          size="slim"
+                          onClick={() => openModal("sync", product.id, product.title)}
+                          disabled={isLoading}
+                        >
+                          Sync Now
+                        </Button>
+                      )}
+                    </IndexTable.Cell>
+                  </IndexTable.Row>
+                ))}
+              </IndexTable>
+            </LegacyCard>
           </BlockStack>
         </Layout.Section>
       </Layout>
@@ -272,11 +528,22 @@ export default function AppProductSync() {
     <Modal
       open={modalState.isOpen}
       onClose={closeModal}
-      title={modalState.type === "remove" ? "Remove Product" : "Sync Product"}
+      title={
+        modalState.type === "remove" 
+          ? "Remove Product" 
+          : modalState.type === "sync" 
+          ? "Sync Product"
+          : modalState.type === "bulkRemove"
+          ? "Remove Selected Products"
+          : "Sync Selected Products"
+      }
       primaryAction={{
-        content: modalState.type === "remove" ? "Remove" : "Sync Now",
+        content: 
+          modalState.type === "remove" || modalState.type === "bulkRemove" 
+            ? "Remove" 
+            : "Sync Now",
         onAction: handleModalConfirm,
-        destructive: modalState.type === "remove",
+        destructive: modalState.type === "remove" || modalState.type === "bulkRemove",
         loading: isLoading,
       }}
       secondaryActions={[
@@ -291,7 +558,11 @@ export default function AppProductSync() {
           <Text as="p">
             {modalState.type === "remove"
               ? `Are you sure you want to remove "${modalState.productTitle}" from the database? This action cannot be undone.`
-              : `Are you sure you want to sync "${modalState.productTitle}" from Shopify to the database?`}
+              : modalState.type === "sync"
+              ? `Are you sure you want to sync "${modalState.productTitle}" from Shopify to the database?`
+              : modalState.type === "bulkRemove"
+              ? `Are you sure you want to remove ${modalState.productIds?.length || 0} selected products from the database? This action cannot be undone.`
+              : `Are you sure you want to sync ${modalState.productIds?.length || 0} selected products from Shopify to the database?`}
           </Text>
         </BlockStack>
       </Modal.Section>
