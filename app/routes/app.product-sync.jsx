@@ -459,6 +459,7 @@ export default function AppProductSync() {
                 filters={filters}
                 appliedFilters={appliedFilters}
                 onClearAll={handleFiltersClearAll}
+                tabs={[]}
               />
               <IndexTable
                 condensed={useBreakpoints().smDown}

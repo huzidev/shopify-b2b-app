@@ -150,8 +150,31 @@ export default function AppPriceList() {
         bValue = b.adjustmentType || '';
         break;
       case 'adjustmentValue':
-        aValue = a.adjustmentValue || 0;
-        bValue = b.adjustmentValue || 0;
+        // Handle Prisma Decimal objects properly
+        aValue = 0;
+        bValue = 0;
+        if (a.adjustmentValue) {
+          try {
+            if (typeof a.adjustmentValue.toNumber === 'function') {
+              aValue = a.adjustmentValue.toNumber();
+            } else {
+              aValue = a.adjustmentValue.d ? a.adjustmentValue.d[0] : 0;
+            }
+          } catch (e) {
+            aValue = 0;
+          }
+        }
+        if (b.adjustmentValue) {
+          try {
+            if (typeof b.adjustmentValue.toNumber === 'function') {
+              bValue = b.adjustmentValue.toNumber();
+            } else {
+              bValue = b.adjustmentValue.d ? b.adjustmentValue.d[0] : 0;
+            }
+          } catch (e) {
+            bValue = 0;
+          }
+        }
         break;
       default:
         aValue = a.name.toLowerCase();
@@ -166,7 +189,7 @@ export default function AppPriceList() {
   const { selectedResources, allResourcesSelected, handleSelectionChange } =
     useIndexResourceState(sortedPriceLists);
 
-  const selectedPriceLists = sortedPriceLists.filter(priceList => selectedResources.includes(priceList.shopifyId));
+  const selectedPriceLists = sortedPriceLists.filter(priceList => selectedResources.includes(priceList.id.toString()));
 
   // Filter handlers
   const handleFiltersQueryChange = useCallback(
@@ -275,12 +298,31 @@ export default function AppPriceList() {
   };
 
   const handleEdit = (priceList) => {
+    // Clear any current selections to prevent confusion
+    handleSelectionChange('page', false);
+    
     setEditingPriceList(priceList);
+    
+    // Handle Prisma Decimal type properly
+    let adjustmentValue = "0";
+    if (priceList.adjustmentValue) {
+      try {
+        if (typeof priceList.adjustmentValue.toNumber === 'function') {
+          adjustmentValue = priceList.adjustmentValue.toNumber().toString();
+        } else {
+          // Fallback: parse the d array from Decimal structure
+          adjustmentValue = priceList.adjustmentValue.d ? priceList.adjustmentValue.d[0].toString() : "0";
+        }
+      } catch (e) {
+        adjustmentValue = "0";
+      }
+    }
+    
     setFormData({
       name: priceList.name,
       currency: priceList.currency,
       adjustmentType: priceList.adjustmentType || "PERCENTAGE_INCREASE",
-      adjustmentValue: priceList.adjustmentValue ? Number(priceList.adjustmentValue).toString() : "0"
+      adjustmentValue: adjustmentValue
     });
     setModalOpen(true);
   };
@@ -308,6 +350,9 @@ export default function AppPriceList() {
   };
 
   const handleCreate = () => {
+    // Clear any current selections
+    handleSelectionChange('page', false);
+    
     setEditingPriceList(null);
     setFormData({
       name: "",
@@ -390,6 +435,7 @@ export default function AppPriceList() {
                 filters={filters}
                 appliedFilters={appliedFilters}
                 onClearAll={handleFiltersClearAll}
+                tabs={[]}
               />
               <IndexTable
                 condensed={useBreakpoints().smDown}
@@ -408,13 +454,27 @@ export default function AppPriceList() {
                 ]}
               >
                 {sortedPriceLists.map((priceList, index) => {
-                  const adjustmentPercent = Number(priceList.adjustmentValue || 0);
+                  // Handle Prisma Decimal type properly
+                  let adjustmentPercent = 0;
+                  if (priceList.adjustmentValue) {
+                    // Use toNumber() method for Prisma Decimal objects
+                    try {
+                      if (typeof priceList.adjustmentValue.toNumber === 'function') {
+                        adjustmentPercent = priceList.adjustmentValue.toNumber();
+                      } else {
+                        // Fallback: parse the d array from Decimal structure
+                        adjustmentPercent = priceList.adjustmentValue.d ? priceList.adjustmentValue.d[0] : 0;
+                      }
+                    } catch (e) {
+                      adjustmentPercent = 0;
+                    }
+                  }
                   
                   return (
                     <IndexTable.Row
-                      id={priceList.shopifyId}
-                      key={priceList.shopifyId}
-                      selected={selectedResources.includes(priceList.shopifyId)}
+                      id={priceList.id.toString()}
+                      key={priceList.id}
+                      selected={selectedResources.includes(priceList.id.toString())}
                       position={index}
                     >
                       <IndexTable.Cell>
@@ -443,11 +503,20 @@ export default function AppPriceList() {
                       </IndexTable.Cell>
                       <IndexTable.Cell>
                         <InlineStack gap="200">
-                          <Button onClick={() => handleEdit(priceList)} size="slim">
+                          <Button 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleEdit(priceList);
+                            }} 
+                            size="slim"
+                          >
                             Edit
                           </Button>
                           <Button 
-                            onClick={() => handleDelete(priceList)} 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDelete(priceList);
+                            }} 
                             size="slim" 
                             tone="critical"
                             disabled={isLoading}
