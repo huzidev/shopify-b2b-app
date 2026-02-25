@@ -1,5 +1,3 @@
-# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
-
 client_id = "55ff66e37edd6bc58e39eb57e31b0443"
 name = "b2b-staging-dev"
 application_url = "https://example.com"
@@ -12,8 +10,12 @@ automatically_update_urls_on_dev = true
 api_version = "2026-04"
 
 [access_scopes]
-# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "read_publications,write_app_proxy,write_companies,write_customers,write_products,write_publications"
+scopes = "read_publications,write_app_proxy,write_companies,write_customers,write_products,write_publications,write_orders"
 
 [auth]
 redirect_urls = [ "https://example.com/api/auth" ]
+
+[app_proxy]
+url = "/api/proxy"
+prefix = "apps"
+subpath = "b2b"
