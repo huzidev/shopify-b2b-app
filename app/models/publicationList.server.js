@@ -1,5 +1,30 @@
 import db from "../db.server";
 
+// Check if publication title exists
+export async function getPublicationByTitle(shop, title) {
+  try {
+    const dbShop = await db.shop.findUnique({
+      where: { shopDomain: shop }
+    });
+
+    if (!dbShop) {
+      return null;
+    }
+
+    const publication = await db.publication.findFirst({
+      where: {
+        shopId: dbShop.id,
+        title: title
+      }
+    });
+
+    return publication;
+  } catch (error) {
+    console.error("Error checking publication title:", error);
+    return null;
+  }
+}
+
 // Get catalogs for publication creation dropdown
 export async function getCatalogsForPublication(shop) {
   try {

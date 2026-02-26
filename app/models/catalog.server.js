@@ -1,5 +1,30 @@
 import prisma from "../db.server";
 
+// Check if catalog title exists
+export async function getCatalogByTitle(shop, title) {
+  try {
+    const dbShop = await prisma.shop.findUnique({
+      where: { shopDomain: shop }
+    });
+
+    if (!dbShop) {
+      return null;
+    }
+
+    const catalog = await prisma.catalog.findFirst({
+      where: {
+        shopId: dbShop.id,
+        title: title
+      }
+    });
+
+    return catalog;
+  } catch (error) {
+    console.error("Error checking catalog title:", error);
+    return null;
+  }
+}
+
 // Get all catalogs for a shop
 export async function getCatalogs(shop) {
   try {

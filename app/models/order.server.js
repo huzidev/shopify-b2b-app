@@ -1,11 +1,5 @@
 import db from "../db.server";
 
-/**
- * Create an order via Shopify GraphQL Admin API
- * @param {object} admin - Shopify Admin GraphQL client
- * @param {object} orderData - Order data with lineItems
- * @returns {Promise<object>} - Created order response
- */
 export async function createOrder(admin, orderData) {
   const { currency, lineItems, customerId, companyId } = orderData;
 

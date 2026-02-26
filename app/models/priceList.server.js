@@ -1,5 +1,29 @@
 import db from "../db.server";
 
+export async function getPriceListByTitle(shop, title) {
+  try {
+    const dbShop = await db.shop.findUnique({
+      where: { shopDomain: shop }
+    });
+
+    if (!dbShop) {
+      return null;
+    }
+
+    const priceList = await db.priceList.findFirst({
+      where: {
+        shopId: dbShop.id,
+        name: title
+      }
+    });
+
+    return priceList;
+  } catch (error) {
+    console.error("Error checking price list title:", error);
+    return null;
+  }
+}
+
 export async function getPriceLists(shop) {
   try {
     const dbShop = await db.shop.findUnique({

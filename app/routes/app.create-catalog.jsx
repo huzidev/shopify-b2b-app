@@ -3,8 +3,11 @@ import { useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { getCompanies } from "../models/company.server";
-import { getPriceLists } from "../models/priceList.server";
-import { getPublications } from "../models/publicationList.server";
+import { createPriceList, getPriceListByTitle } from "../models/priceList.server";
+import { createPublication, updatePublication, getPublicationByTitle } from "../models/publicationList.server";
+import { getCatalogByTitle } from "../models/catalog.server";
+import { PriceListForm } from "../components/PriceListForm";
+import { PublicationForm } from "../components/PublicationForm";
 import {
   Page,
   Layout,
@@ -16,6 +19,7 @@ import {
   Button,
   Banner,
   InlineStack,
+  Box,
   ProgressBar,
   Badge
 } from "@shopify/polaris";
@@ -23,40 +27,163 @@ import { useAppBridge } from "@shopify/app-bridge-react";
 
 export const loader = async ({ request }) => {
   const { session } = await authenticate.admin(request);
-  // Fetch companies, price lists, and publications for this shop
+  // Fetch companies for the form
   const companies = await getCompanies(session.shop);
-  const priceLists = await getPriceLists(session.shop);
-  const publications = await getPublications(session.shop);
   return { 
-    companies,
-    priceLists,
-    publications
+    companies
   };
 };
 
 export const action = async ({ request }) => {
   const { admin, session } = await authenticate.admin(request);
   const formData = await request.formData();
-  const companyId = formData.get("companyId");
-  const locationId = formData.get("locationId");
-  const priceListId = formData.get("priceListId");
-  const publicationId = formData.get("publicationId");
-  const title = formData.get("title");
-
+  const actionType = formData.get("actionType");
+  
   try {
-    const result = await import("../models/catalog.server").then(m =>
-      m.createCatalog({
+    if (actionType === "createCatalog") {
+      const companyId = formData.get("companyId");
+      const locationId = formData.get("locationId");
+      const title = formData.get("title");
+      
+      // Parse price list data
+      const priceListData = JSON.parse(formData.get("priceListData"));
+      
+      // Parse publication data  
+      const publicationData = JSON.parse(formData.get("publicationData"));
+      const selectedProducts = JSON.parse(formData.get("selectedProducts") || "[]");
+
+      // STEP 0: Validate all titles for duplicates BEFORE making any mutations
+      const [existingPriceList, existingPublication, existingCatalog] = await Promise.all([
+        getPriceListByTitle(session.shop, priceListData.name),
+        getPublicationByTitle(session.shop, publicationData.title),
+        getCatalogByTitle(session.shop, title)
+      ]);
+
+      // Check for duplicate price list name
+      if (existingPriceList) {
+        return {
+          success: false,
+          error: `Price list name "${priceListData.name}" already exists. Please choose a different name.`,
+          step: "priceList"
+        };
+      }
+
+      // Check for duplicate publication title
+      if (existingPublication) {
+        return {
+          success: false,
+          error: `Publication title "${publicationData.title}" already exists. Please choose a different title.`,
+          step: "publication"
+        };
+      }
+
+      // Check for duplicate catalog title
+      if (existingCatalog) {
+        return {
+          success: false,
+          error: `Catalog title "${title}" already exists. Please choose a different title.`,
+          step: "catalog"
+        };
+      }
+
+      // All titles are unique, proceed with mutations
+      
+      // Step 1: Create the price list
+      const priceListResult = await createPriceList({
         admin,
         shop: session.shop,
-        companyId,
-        locationId,
-        priceListId,
-        publicationId,
-        title
-      })
-    );
+        name: priceListData.name,
+        currency: priceListData.currency,
+        adjustmentType: priceListData.adjustmentType,
+        adjustmentValue: parseFloat(priceListData.adjustmentValue)
+      });
 
-    return result;
+      if (!priceListResult.success) {
+        return { 
+          success: false, 
+          error: `Failed to create price list: ${priceListResult.error}`,
+          step: "priceList"
+        };
+      }
+
+      // Step 2: Create the publication (without catalog initially)
+      const publicationResult = await createPublication({
+        admin,
+        shop: session.shop,
+        catalogId: null, // Will be updated after catalog creation
+        title: publicationData.title,
+        defaultState: publicationData.defaultState,
+        autoPublish: false
+      });
+
+      if (!publicationResult.success) {
+        return { 
+          success: false, 
+          error: `Failed to create publication: ${publicationResult.error}`,
+          step: "publication"
+        };
+      }
+
+      // Step 2.5: If manual product selection, add products to publication
+      if (publicationData.defaultState === "EMPTY" && selectedProducts.length > 0) {
+        const productIds = selectedProducts.map(product => product.id);
+        
+        const updateResult = await updatePublication({
+          admin,
+          shop: session.shop,
+          publicationId: publicationResult.publication.id,
+          publishablesToAdd: productIds,
+          publishablesToRemove: []
+        });
+
+        if (!updateResult.success) {
+          console.warn(`Failed to add products to publication: ${updateResult.error}`);
+          // Don't fail the entire process, just log the warning
+        }
+      }
+
+      // Step 3: Create the catalog with the new price list and publication
+      const result = await import("../models/catalog.server").then(m =>
+        m.createCatalog({
+          admin,
+          shop: session.shop,
+          companyId,
+          locationId,
+          priceListId: priceListResult.priceList.id.toString(),
+          publicationId: publicationResult.publication.id.toString(),
+          title
+        })
+      );
+
+      if (!result.success) {
+        return { 
+          success: false, 
+          error: `Failed to create catalog: ${result.error}`,
+          step: "catalog"
+        };
+      }
+
+      // Step 4: Update the publication to link it with the created catalog
+      const prismaClient = await import("../db.server").then(m => m.default);
+      try {
+        await prismaClient.publication.update({
+          where: { id: publicationResult.publication.id },
+          data: { catalogId: result.catalog.id }
+        });
+      } catch (linkError) {
+        console.warn(`Failed to link publication to catalog: ${linkError.message}`);
+        // Don't fail the process as catalog is already created successfully
+      }
+
+      return { 
+        success: true, 
+        catalog: result.catalog,
+        priceList: priceListResult.priceList,
+        publication: publicationResult.publication
+      };
+    }
+    
+    return { success: false, error: "Unknown action" };
   } catch (error) {
     return { success: false, error: error.message };
   }
@@ -65,28 +192,51 @@ export const action = async ({ request }) => {
 export default function AppCreateCatalog() {
   const fetcher = useFetcher();
   const shopify = useAppBridge();
-  const { companies, priceLists, publications } = useLoaderData();
+  const { companies } = useLoaderData();
   const isLoading = fetcher.state === "submitting";
 
   const [currentStep, setCurrentStep] = useState(1);
   const [selectedCompanyId, setSelectedCompanyId] = useState("");
   const [selectedLocationId, setSelectedLocationId] = useState("");
-  const [selectedPriceListId, setSelectedPriceListId] = useState("");
-  const [selectedPublicationId, setSelectedPublicationId] = useState("");
   const [title, setTitle] = useState("");
+
+  // Price List Form State
+  const [priceListData, setPriceListData] = useState({
+    name: "",
+    currency: "USD",
+    adjustmentType: "PERCENTAGE_INCREASE",
+    adjustmentValue: "0"
+  });
+
+  // Publication Form State
+  const [publicationData, setPublicationData] = useState({
+    title: "",
+    defaultState: "ALL_PRODUCTS"
+  });
+
+  const [selectedProducts, setSelectedProducts] = useState([]);
+  const [errors, setErrors] = useState({});
+
+  // Track which steps user has visited to prevent auto-completion
+  const [visitedSteps, setVisitedSteps] = useState(new Set([1]));
+  const [hasAutoGeneratedNames, setHasAutoGeneratedNames] = useState(false);
 
   // dynamic locations for selected company
   const [locations, setLocations] = useState([]);
 
   const steps = [
-    { id: 1, label: "Select Company", completed: !!selectedCompanyId && !!selectedLocationId },
-    { id: 2, label: "Select Price List", completed: !!selectedPriceListId },
-    { id: 3, label: "Select Publication", completed: !!selectedPublicationId },
-    { id: 4, label: "Catalog Details", completed: !!title }
+    { id: 1, label: "Company & Location", completed: !!selectedCompanyId && !!selectedLocationId },
+    { id: 2, label: "Create Price List", completed: visitedSteps.has(2) && !!priceListData.name && !!priceListData.adjustmentValue },
+    { id: 3, label: "Create Publication", completed: visitedSteps.has(3) && !!publicationData.title && (publicationData.defaultState === "ALL_PRODUCTS" || selectedProducts.length > 0) },
+    { id: 4, label: "Catalog Details", completed: visitedSteps.has(4) && !!title }
   ];
 
   const currentStepData = steps.find(step => step.id === currentStep);
   const completedSteps = steps.filter(step => step.completed).length;
+  
+  // Progress based on current step, not completion status
+  // Show 100% when loading (submitting) on final step
+  const progressPercentage = isLoading && currentStep === 4 ? 100 : ((currentStep - 1) / 4) * 100;
 
   // Update locations when company changes
   useEffect(() => {
@@ -108,15 +258,25 @@ export default function AppCreateCatalog() {
         setLocations([]);
         setSelectedLocationId("");
       }
-      // Set default title
-      if (!title) {
+      
+      // Auto-set names based on company - only if not manually changed
+      if (!hasAutoGeneratedNames) {
         setTitle(`Catalog for ${company.name}`);
+        setPriceListData(prev => ({
+          ...prev,
+          name: `${company.name} Pricing`
+        }));
+        setPublicationData(prev => ({
+          ...prev,
+          title: `${company.name} Publication`
+        }));
+        setHasAutoGeneratedNames(true);
       }
     } else {
       setLocations([]);
       setSelectedLocationId("");
     }
-  }, [selectedCompanyId, companies, title]);
+  }, [selectedCompanyId, companies, hasAutoGeneratedNames]);
 
   useEffect(() => {
     if (fetcher.data?.success) {
@@ -125,17 +285,47 @@ export default function AppCreateCatalog() {
       setCurrentStep(1);
       setSelectedCompanyId("");
       setSelectedLocationId("");
-      setSelectedPriceListId("");
-      setSelectedPublicationId("");
+      setPriceListData({
+        name: "",
+        currency: "USD",
+        adjustmentType: "PERCENTAGE_INCREASE",
+        adjustmentValue: "0"
+      });
+      setPublicationData({
+        title: "",
+        defaultState: "ALL_PRODUCTS"
+      });
+      setSelectedProducts([]);
       setTitle("");
+      setErrors({});
+      setVisitedSteps(new Set([1]));
+      setHasAutoGeneratedNames(false);
     } else if (fetcher.data?.error) {
-      shopify.toast.show(`Error: ${fetcher.data.error}`, { isError: true });
+      const error = fetcher.data.error;
+      const step = fetcher.data.step;
+      
+      // Set error for specific step
+      const newErrors = {};
+      if (step === "priceList") {
+        newErrors.priceList = error;
+        setCurrentStep(2); // Navigate to price list step
+      } else if (step === "publication") {
+        newErrors.publication = error;
+        setCurrentStep(3); // Navigate to publication step
+      } else {
+        newErrors.general = error;
+      }
+      setErrors(newErrors);
+      
+      shopify.toast.show(`Error: ${error}`, { isError: true });
     }
   }, [fetcher.data, shopify]);
 
   const handleNext = () => {
     if (currentStep < 4) {
-      setCurrentStep(currentStep + 1);
+      const nextStep = currentStep + 1;
+      setCurrentStep(nextStep);
+      setVisitedSteps(prev => new Set([...prev, nextStep]));
     }
   };
 
@@ -146,12 +336,16 @@ export default function AppCreateCatalog() {
   };
 
   const handleSubmit = () => {
+    setErrors({}); // Clear previous errors
+    
     fetcher.submit(
       { 
+        actionType: "createCatalog",
         companyId: selectedCompanyId, 
         locationId: selectedLocationId, 
-        priceListId: selectedPriceListId,
-        publicationId: selectedPublicationId,
+        priceListData: JSON.stringify(priceListData),
+        publicationData: JSON.stringify(publicationData),
+        selectedProducts: JSON.stringify(selectedProducts),
         title 
       },
       { method: "POST" }
@@ -163,9 +357,14 @@ export default function AppCreateCatalog() {
       case 1:
         return selectedCompanyId && selectedLocationId;
       case 2:
-        return selectedPriceListId;
+        const hasValidPriceList = priceListData.name && 
+          priceListData.adjustmentValue !== null && 
+          priceListData.adjustmentValue !== "";
+        return hasValidPriceList;
       case 3:
-        return selectedPublicationId;
+        const hasValidPublication = publicationData.title && 
+          (publicationData.defaultState === "ALL_PRODUCTS" || selectedProducts.length > 0);
+        return hasValidPublication;
       case 4:
         return title;
       default:
@@ -177,156 +376,125 @@ export default function AppCreateCatalog() {
     switch (currentStep) {
       case 1:
         return (
-          <BlockStack gap="4">
-            <Text variant="headingMd" as="h3">
-              Step 1: Select Company & Location
-            </Text>
-            
-            <Select
-              label="Select Company"
-              options={[
-                { label: "Choose a company...", value: "", disabled: true },
-                ...(companies?.map(c => ({
-                  label: c.name,
-                  value: c.id.toString()
-                })) || [])
-              ]}
-              value={selectedCompanyId}
-              onChange={setSelectedCompanyId}
-            />
-
-            {locations.length > 0 && (
+          <Card sectioned>
+            <BlockStack gap="400">
+              <Box>
+                <Text variant="headingMd" as="h3">
+                  Select Company & Location
+                </Text>
+                <Text variant="bodyMd" tone="subdued">
+                  Choose the company and location for this catalog. This determines who can access the catalog and where products will be available.
+                </Text>
+              </Box>
+              
               <Select
-                label="Select Company Location"
-                options={locations.map(l => ({
-                  label: l.name,
-                  value: l.shopifyId
-                }))}
-                value={selectedLocationId}
-                onChange={setSelectedLocationId}
+                label="Select Company"
+                options={[
+                  { label: "Choose a company...", value: "", disabled: true },
+                  ...(companies?.map(c => ({
+                    label: c.name,
+                    value: c.id.toString()
+                  })) || [])
+                ]}
+                value={selectedCompanyId}
+                onChange={setSelectedCompanyId}
+                requiredIndicator
               />
-            )}
-          </BlockStack>
+
+              {locations.length > 0 && (
+                <Select
+                  label="Select Company Location"
+                  options={locations.map(l => ({
+                    label: l.name,
+                    value: l.shopifyId
+                  }))}
+                  value={selectedLocationId}
+                  onChange={setSelectedLocationId}
+                  requiredIndicator
+                />
+              )}
+
+              {selectedCompanyId && locations.length === 0 && (
+                <Banner status="warning">
+                  <Text as="p">
+                    This company has no configured locations. Please ensure the company has been set up properly.
+                  </Text>
+                </Banner>
+              )}
+            </BlockStack>
+          </Card>
         );
 
       case 2:
         return (
-          <BlockStack gap="4">
-            <InlineStack align="space-between">
-              <Text variant="headingMd" as="h3">
-                Step 2: Select Price List
-              </Text>
-              <Button url="/app/price-list" external>
-                Manage Price Lists
-              </Button>
-            </InlineStack>
-            
-            {priceLists?.length === 0 ? (
-              <Banner status="warning">
-                <Text as="p">
-                  No price lists found. <Button url="/app/price-list" external plain>Create a price list</Button> first.
-                </Text>
-              </Banner>
-            ) : (
-              <Select
-                label="Select Price List"
-                options={[
-                  { label: "Choose a price list...", value: "", disabled: true },
-                  ...(priceLists?.map(pl => ({
-                    label: `${pl.name} (${pl.currency}) - ${pl.adjustmentType?.replace('_', ' ')} ${pl.adjustmentValue}%`,
-                    value: pl.id.toString()
-                  })) || [])
-                ]}
-                value={selectedPriceListId}
-                onChange={setSelectedPriceListId}
-              />
-            )}
-          </BlockStack>
+          <PriceListForm 
+            formData={priceListData}
+            onChange={setPriceListData}
+            errors={errors}
+            existingPriceLists={[]}
+            disabled={isLoading}
+          />
         );
 
       case 3:
         return (
-          <BlockStack gap="4">
-            <Text variant="headingMd" as="h3">
-              Step 3: Select Publication
-            </Text>
-            
-            <Text variant="bodyMd" as="p">
-              Choose a publication to control which products are available in this catalog.
-            </Text>
-
-            {publications?.length === 0 ? (
-              <Banner status="warning">
-                <Text as="p">
-                  No publications found. You may need to create a publication first.
-                </Text>
-              </Banner>
-            ) : (
-              <Select
-                label="Publication"
-                options={[
-                  { label: "Select a publication...", value: "", disabled: true },
-                  ...(publications?.map(pub => ({
-                    label: pub.title || "Untitled Publication",
-                    value: pub.id.toString()
-                  })) || [])
-                ]}
-                value={selectedPublicationId}
-                onChange={setSelectedPublicationId}
-              />
-            )}
-
-            {selectedPublicationId && (
-              <Card sectioned>
-                <BlockStack gap="2">
-                  <Text variant="headingSm" as="h4">Selected Publication</Text>
-                  {(() => {
-                    const selectedPub = publications?.find(p => p.id === parseInt(selectedPublicationId));
-                    return (
-                      <BlockStack gap="1">
-                        <Text><strong>Title:</strong> {selectedPub?.title || "Untitled Publication"}</Text>
-                        <Text><strong>Default State:</strong> {selectedPub?.defaultState}</Text>
-                        <Text><strong>Auto Publish:</strong> {selectedPub?.autoPublish ? "Yes" : "No"}</Text>
-                        {selectedPub?.catalog && (
-                          <Text><strong>Catalog:</strong> {selectedPub.catalog.title}</Text>
-                        )}
-                      </BlockStack>
-                    );
-                  })()}
-                </BlockStack>
-              </Card>
-            )}
-          </BlockStack>
+          <PublicationForm 
+            formData={publicationData}
+            onChange={setPublicationData}
+            errors={errors}
+            disabled={isLoading}
+            selectedProducts={selectedProducts}
+            onProductsChange={setSelectedProducts}
+          />
         );
 
       case 4:
         const selectedCompany = companies?.find(c => c.id === parseInt(selectedCompanyId));
-        const selectedPriceList = priceLists?.find(pl => pl.id === parseInt(selectedPriceListId));
-        const selectedPublication = publications?.find(p => p.id === parseInt(selectedPublicationId));
         
         return (
-          <BlockStack gap="4">
-            <Text variant="headingMd" as="h3">
-              Step 4: Catalog Details
-            </Text>
-            
-            <Card sectioned>
-              <BlockStack gap="3">
-                <Text variant="headingSm" as="h4">Summary</Text>
-                <Text><strong>Company:</strong> {selectedCompany?.name}</Text>
-                <Text><strong>Location:</strong> {locations.find(l => l.shopifyId === selectedLocationId)?.name}</Text>
-                <Text><strong>Price List:</strong> {selectedPriceList?.name} ({selectedPriceList?.currency})</Text>
-                <Text><strong>Publication:</strong> {selectedPublication?.title || "Untitled Publication"}</Text>
-              </BlockStack>
-            </Card>
+          <Card sectioned>
+            <BlockStack gap="400">
+              <Box>
+                <Text variant="headingMd" as="h3">
+                  Catalog Details & Review
+                </Text>
+                <Text variant="bodyMd" tone="subdued">
+                  Review your settings and provide a name for your catalog.
+                </Text>
+              </Box>
+              
+              {errors.general && (
+                <Banner status="critical">
+                  <Text as="p">{errors.general}</Text>
+                </Banner>
+              )}
 
-            <TextField
-              label="Catalog Title"
-              value={title}
-              onChange={setTitle}
-              autoComplete="off"
-            />
-          </BlockStack>
+              <Card sectioned subdued>
+                <BlockStack gap="300">
+                  <Text variant="headingSm" as="h4">Summary</Text>
+                  <InlineStack wrap={false} gap="400">
+                    <Box style={{ flex: 1 }}>
+                      <Text variant="bodyMd"><strong>Company:</strong> {selectedCompany?.name}</Text>
+                      <Text variant="bodyMd"><strong>Location:</strong> {locations.find(l => l.shopifyId === selectedLocationId)?.name}</Text>
+                    </Box>
+                    <Box style={{ flex: 1 }}>
+                      <Text variant="bodyMd"><strong>Price List:</strong> {priceListData.name}</Text>
+                      <Text variant="bodyMd"><strong>Publication:</strong> {publicationData.title}</Text>
+                    </Box>
+                  </InlineStack>
+                </BlockStack>
+              </Card>
+
+              <TextField
+                label="Catalog Title"
+                value={title}
+                onChange={setTitle}
+                placeholder="e.g. Core Wholesale Catalog, VIP Customer Catalog"
+                autoComplete="off"
+                requiredIndicator
+              />
+            </BlockStack>
+          </Card>
         );
 
       default:
@@ -337,7 +505,7 @@ export default function AppCreateCatalog() {
   return (
     <Page
       title="Create Catalog"
-      subtitle="Create and manage B2B catalogs"
+      subtitle="Create a new B2B catalog with custom pricing and product selection"
       backAction={{
         content: "Back to Dashboard",
         url: "/app"
@@ -345,32 +513,33 @@ export default function AppCreateCatalog() {
     >
       <Layout>
         <Layout.Section>
-          <BlockStack gap="6">
-            {fetcher.data?.error && (
+          <BlockStack gap="600">
+            {/* Global error banner */}
+            {errors.general && (
               <Banner status="critical">
-                <Text as="p">{fetcher.data.error}</Text>
+                <Text as="p">{errors.general}</Text>
               </Banner>
             )}
 
             {/* Progress Indicator */}
             <Card sectioned>
-              <BlockStack gap="4">
+              <BlockStack gap="400">
                 <InlineStack align="space-between">
-                  <Text variant="headingSm" as="h2">
-                    Progress: Step {currentStep} of 4
+                  <Text variant="headingMd" as="h2">
+                    Step {currentStep} of 4: {currentStepData?.label}
                   </Text>
-                  <Text variant="bodySm">
+                  <Text variant="bodySm" tone="subdued">
                     {completedSteps} of 4 steps completed
                   </Text>
                 </InlineStack>
-                <ProgressBar progress={(completedSteps / 3) * 100} />
-                <InlineStack gap="4">
+                <ProgressBar progress={progressPercentage} />
+                <InlineStack gap="200" wrap>
                   {steps.map((step) => (
                     <Badge 
                       key={step.id} 
-                      status={step.completed ? "success" : currentStep === step.id ? "info" : "default"}
+                      status={step.completed ? "success" : currentStep === step.id ? "attention" : "default"}
                     >
-                      {step.label}
+                      {step.id}. {step.label}
                     </Badge>
                   ))}
                 </InlineStack>
@@ -378,32 +547,30 @@ export default function AppCreateCatalog() {
             </Card>
 
             {/* Step Content */}
-            <Card sectioned>
-              {renderStepContent()}
-            </Card>
+            {renderStepContent()}
 
             {/* Navigation */}
             <Card sectioned>
               <InlineStack align="space-between">
                 <Button 
                   onClick={handlePrevious} 
-                  disabled={currentStep === 1}
+                  disabled={currentStep === 1 || isLoading}
                 >
                   Previous
                 </Button>
                 
-                <InlineStack gap="2">
+                <InlineStack gap="200">
                   {currentStep < 4 ? (
                     <Button 
-                      primary 
+                      variant="primary" 
                       onClick={handleNext}
-                      disabled={!canProceedToNext()}
+                      disabled={!canProceedToNext() || isLoading}
                     >
                       Next
                     </Button>
                   ) : (
                     <Button
-                      primary
+                      variant="primary"
                       loading={isLoading}
                       disabled={!canProceedToNext() || isLoading}
                       onClick={handleSubmit}

@@ -98,9 +98,9 @@ export default function Catalogs() {
         url: "/app"
       }}
       primaryAction={
-        <Button variant="primary" url="/app/create-catalog">
+        <Link url="/app/create-catalog">
           Create catalog
-        </Button>
+        </Link>
       }
     >
       <Card padding="0">
