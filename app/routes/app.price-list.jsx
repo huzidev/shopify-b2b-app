@@ -398,8 +398,7 @@ export default function AppPriceList() {
       title="Price Lists"
       subtitle="Manage price lists for B2B catalogs"
       backAction={{
-        content: "Back to Dashboard",
-        url: "/app"
+        onAction: () => navigate("/app"),
       }}
       primaryAction={{
         content: "Create Price List",

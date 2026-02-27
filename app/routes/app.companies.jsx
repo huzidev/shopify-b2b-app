@@ -111,6 +111,7 @@ export default function Companies() {
   const [sortPopoverActive, setSortPopoverActive] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const perPage = 5;
+  const navigate = useNavigate();
 
   // Transform database companies to match UI format
   const transformedCompanies = companies?.map(company => ({
@@ -159,8 +160,7 @@ export default function Companies() {
     <Page
       title="Companies"
       backAction={{
-        content: "Back to Dashboard",
-        url: "/app"
+        onAction: () => navigate("/app"),
       }}
       primaryAction={
         <Button variant="primary" url="/app/create-company">

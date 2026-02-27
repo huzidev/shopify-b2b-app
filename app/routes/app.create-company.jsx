@@ -83,8 +83,7 @@ export default function AppCreateCompany() {
       title="Create Company"
       subtitle="Create and manage B2B companies"
       backAction={{
-        content: "Back to Companies",
-        url: "/app/manage-companies",
+        onAction: () => navigate("/app/manage-companies"),
       }}
     >
       <Layout>

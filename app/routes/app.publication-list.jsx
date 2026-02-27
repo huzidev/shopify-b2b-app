@@ -187,8 +187,7 @@ export default function Publications() {
     <Page
       title="Publications"
       backAction={{
-        content: "Back to Dashboard",
-        url: "/app"
+        onAction: () => navigate("/app"),
       }}
       primaryAction={
         <Button variant="primary" onClick={handleCreatePublication}>

@@ -94,8 +94,7 @@ export default function Catalogs() {
     <Page
       title="Catalogs"
       backAction={{
-        content: "Back to Dashboard",
-        url: "/app"
+        onAction: () => navigate("/app"),
       }}
       primaryAction={
         <Link url="/app/create-catalog">

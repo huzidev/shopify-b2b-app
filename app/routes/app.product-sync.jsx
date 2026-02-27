@@ -376,8 +376,7 @@ export default function AppProductSync() {
         title="Product Sync"
         subtitle="Sync your Shopify products to the B2B system"
         backAction={{
-          content: "Back to Dashboard",
-          url: "/app",
+          onAction: () => navigate("/app"),
         }}
         primaryAction={{
           content: isLoading ? "Syncing..." : "Sync All Products",

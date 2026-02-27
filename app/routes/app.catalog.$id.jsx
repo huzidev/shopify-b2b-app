@@ -55,8 +55,10 @@ export default function CatalogDetail() {
   if (!catalog) {
     return (
       <Page
-        backAction={{ content: "Catalogs", url: "/app/catalogs" }}
         title="Catalog Not Found"
+        backAction={{
+          onAction: () => navigate("/app/catalogs"),
+        }}
       >
         <Card>
           <Text>Catalog not found or you don't have access to view it.</Text>
@@ -104,7 +106,9 @@ export default function CatalogDetail() {
 
   return (
     <Page
-      backAction={{ content: "Catalogs", url: "/app/catalogs" }}
+      backAction={{
+        onAction: () => navigate("/app/catalogs"),
+      }}
       title={catalog.title || "Catalog"}
       titleMetadata={<Badge tone="success">{catalog.status || "Active"}</Badge>}
       primaryAction={<Button variant="primary">Save</Button>}

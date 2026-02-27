@@ -75,8 +75,10 @@ export default function CompanyDetail() {
   if (!company) {
     return (
       <Page
-        backAction={{ content: "Companies", url: "/app/manage-companies", icon: ArrowLeftIcon }}
         title="Company Not Found"
+        backAction={{
+          onAction: () => navigate("/app/manage-companies"),
+        }}
       >
         <Card>
           <Text>Company not found or you don't have access to view it.</Text>
@@ -110,7 +112,9 @@ export default function CompanyDetail() {
 
   return (
     <Page
-      backAction={{ content: "Companies", url: "/app/manage-companies", icon: ArrowLeftIcon }}
+      backAction={{
+        onAction: () => navigate("/app/manage-companies"),
+      }}
       title={company.name}
       titleMetadata={<Badge tone="success">Active</Badge>}
       secondaryActions={[{ content: "Edit company", onAction: () => {} }]}
