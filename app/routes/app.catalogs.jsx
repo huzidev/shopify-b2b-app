@@ -98,9 +98,9 @@ export default function Catalogs() {
         onAction: () => navigate("/app"),
       }}
       primaryAction={
-        <Link url="/app/create-catalog">
+        <Button onClick={() => navigate("/app/create-catalog")} variant="primary">
           Create catalog
-        </Link>
+        </Button>
       }
     >
       <Card padding="0">
@@ -260,11 +260,9 @@ export default function Catalogs() {
                         checked={isSelected}
                         onChange={() => handleSelectRow(catalog.id)}
                       />
-                      <Link url={`/app/catalog/${catalog.id}`} monochrome removeUnderline={false}>
-                        <Text variant="bodyMd" tone="interactive">
-                          {catalog.name}
-                        </Text>
-                      </Link>
+                      <Text variant="bodyMd" tone="interactive">
+                        {catalog.name}
+                      </Text>
                       <Text variant="bodyMd" alignment="end">
                         {catalog.products}
                       </Text>
@@ -277,7 +275,7 @@ export default function Catalogs() {
                         </Badge>
                       </div>
                       <div style={{ textAlign: "right" }}>
-                        <Button variant="plain" tone="interactive" url={`/app/catalog/${catalog.id}`}>
+                        <Button variant="plain" tone="interactive" onClick={() => navigate(`/app/catalog/${catalog.id}`)}>
                           View
                         </Button>
                       </div>

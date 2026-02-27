@@ -1,5 +1,138 @@
 import db from "../db.server";
 
+// Get products by their Shopify IDs with detailed information
+export async function getProductsByIds(admin, productIds) {
+  if (!productIds || productIds.length === 0) return [];
+  
+  const products = [];
+  
+  // Process products in batches to avoid query length limits
+  const batchSize = 10;
+  for (let i = 0; i < productIds.length; i += batchSize) {
+    const batch = productIds.slice(i, i + batchSize);
+    
+    for (const productId of batch) {
+      try {
+        const response = await admin.graphql(
+          `#graphql
+            query getProduct($id: ID!) {
+              product(id: $id) {
+                id
+                title
+                description
+                onlineStoreUrl
+                priceRangeV2 {
+                  minVariantPrice {
+                    amount
+                    currencyCode
+                  }
+                }
+                variants(first: 10) {
+                  edges {
+                    node {
+                      id
+                      sku
+                    }
+                  }
+                }
+              }
+            }
+          `,
+          {
+            variables: {
+              id: productId
+            }
+          }
+        );
+
+        const data = await response.json();
+        if (data.data?.product) {
+          const product = data.data.product;
+          const firstVariant = product.variants?.edges?.[0]?.node;
+          
+          products.push({
+            id: product.id,
+            title: product.title,
+            description: product.description,
+            sku: firstVariant?.sku || 'N/A',
+            price: product.priceRangeV2?.minVariantPrice ? 
+              `$${parseFloat(product.priceRangeV2.minVariantPrice.amount).toFixed(2)}` : 'N/A',
+            variants: product.variants?.edges?.map(edge => edge.node) || []
+          });
+        }
+      } catch (error) {
+        console.error(`Error fetching product ${productId}:`, error);
+      }
+    }
+  }
+
+  return products;
+}
+
+// Get all available products for selection modal
+export async function getAllAvailableProducts(admin) {
+  try {
+    const response = await admin.graphql(
+      `#graphql
+        query getAllProducts($first: Int!) {
+          products(first: $first) {
+            edges {
+              node {
+                id
+                title
+                handle
+                status
+                priceRangeV2 {
+                  minVariantPrice {
+                    amount
+                    currencyCode
+                  }
+                }
+                variants(first: 1) {
+                  edges {
+                    node {
+                      id
+                      sku
+                    }
+                  }
+                }
+              }
+            }
+            pageInfo {
+              hasNextPage
+              endCursor
+            }
+          }
+        }
+      `,
+      {
+        variables: {
+          first: 50
+        }
+      }
+    );
+
+    const data = await response.json();
+    return data.data?.products?.edges?.map(edge => {
+      const product = edge.node;
+      const variant = product.variants?.edges?.[0]?.node;
+      
+      return {
+        id: product.id,
+        title: product.title,
+        handle: product.handle,
+        status: product.status,
+        sku: variant?.sku || 'N/A',
+        price: product.priceRangeV2?.minVariantPrice ? 
+          `$${parseFloat(product.priceRangeV2.minVariantPrice.amount).toFixed(2)}` : 'N/A'
+      };
+    }) || [];
+  } catch (error) {
+    console.error("Error fetching all products:", error);
+    return [];
+  }
+}
+
 export async function getAllProductsFromShopify(admin) {
   const response = await admin.graphql(
     `#graphql

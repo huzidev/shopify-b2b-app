@@ -508,7 +508,7 @@ export default function AppCreateCatalog() {
       title="Create Catalog"
       subtitle="Create a new B2B catalog with custom pricing and product selection"
       backAction={{
-        onAction: () => navigate("/app"),
+        onAction: () => navigate("/app/catalogs"),
       }}
     >
       <Layout>

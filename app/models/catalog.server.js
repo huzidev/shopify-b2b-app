@@ -100,6 +100,212 @@ export async function getCatalog(shop, catalogId) {
   }
 }
 
+// Check if catalog title exists (excluding current catalog)
+export async function getCatalogByTitleExcluding(shop, title, excludeCatalogId) {
+  try {
+    const dbShop = await prisma.shop.findUnique({
+      where: { shopDomain: shop }
+    });
+
+    if (!dbShop) {
+      return null;
+    }
+
+    const catalog = await prisma.catalog.findFirst({
+      where: {
+        shopId: dbShop.id,
+        title: title,
+        id: {
+          not: parseInt(excludeCatalogId)
+        }
+      }
+    });
+
+    return catalog;
+  } catch (error) {
+    console.error("Error checking catalog title:", error);
+    return null;
+  }
+}
+
+// Update catalog
+export async function updateCatalog({
+  admin,
+  shop,
+  catalogId,
+  title,
+  status,
+  priceListId,
+  publicationId,
+  newLocationId
+}) {
+  try {
+    const dbShop = await prisma.shop.findUnique({
+      where: { shopDomain: shop }
+    });
+
+    if (!dbShop) {
+      return { success: false, error: "Shop not found" };
+    }
+
+    // Get current catalog
+    const catalog = await prisma.catalog.findFirst({
+      where: {
+        id: parseInt(catalogId),
+        shopId: dbShop.id
+      },
+      include: {
+        priceList: true,
+        publications: true,
+        companyLocation: true
+      }
+    });
+
+    if (!catalog) {
+      return { success: false, error: "Catalog not found" };
+    }
+
+    // Check for duplicate title if title is being changed
+    if (title && title !== catalog.title) {
+      const existingCatalog = await getCatalogByTitleExcluding(shop, title, catalogId);
+      if (existingCatalog) {
+        return {
+          success: false,
+          error: `A catalog named "${title}" already exists. Please choose a different name.`
+        };
+      }
+    }
+
+    // Prepare update input
+    const updateInput = {};
+    
+    if (title) updateInput.title = title;
+    if (status) updateInput.status = status;
+    
+    // Add context with company location IDs if location is being updated
+    if (newLocationId) {
+      updateInput.context = {
+        companyLocationIds: [newLocationId]
+      };
+    }
+    
+    // Add priceListId if provided and it's a Shopify ID
+    if (priceListId) {
+      if (priceListId.startsWith('gid://shopify/PriceList/')) {
+        updateInput.priceListId = priceListId;
+      } else {
+        // It's a database ID, get the Shopify ID
+        const priceList = await prisma.priceList.findFirst({
+          where: {
+            id: parseInt(priceListId),
+            shopId: dbShop.id
+          }
+        });
+        if (priceList) {
+          updateInput.priceListId = priceList.shopifyId;
+        }
+      }
+    }
+
+    // Add publicationId if provided and it's a Shopify ID
+    if (publicationId) {
+      if (publicationId.startsWith('gid://shopify/Publication/')) {
+        updateInput.publicationId = publicationId;
+      } else {
+        // It's a database ID, get the Shopify ID
+        const publication = await prisma.publication.findFirst({
+          where: {
+            id: parseInt(publicationId),
+            shopId: dbShop.id
+          }
+        });
+        if (publication) {
+          updateInput.publicationId = publication.shopifyId;
+        }
+      }
+    }
+
+    // Update catalog in Shopify
+    const response = await admin.graphql(
+      `#graphql
+        mutation catalogUpdate($id: ID!, $input: CatalogUpdateInput!) {
+          catalogUpdate(id: $id, input: $input) {
+            catalog {
+              id
+              title
+              status
+              priceList { id }
+              publication { id }
+            }
+            userErrors {
+              field
+              message
+            }
+          }
+        }
+      `,
+      {
+        variables: {
+          id: catalog.shopifyId,
+          input: updateInput
+        }
+      }
+    );
+
+    const data = await response.json();
+    const result = data.data.catalogUpdate;
+
+    if (result.userErrors?.length > 0) {
+      return {
+        success: false,
+        error: result.userErrors[0].message
+      };
+    }
+
+    // Update local database
+    const updateData = {};
+    if (title) updateData.title = title;
+    if (status) updateData.status = status;
+    
+    // Update company location if provided
+    if (newLocationId) {
+      const newDbLocation = await prisma.companyLocation.findUnique({
+        where: { shopifyId: newLocationId }
+      });
+      if (newDbLocation) {
+        updateData.companyLocationId = newDbLocation.id;
+      }
+    }
+
+    const updatedCatalog = await prisma.catalog.update({
+      where: { id: parseInt(catalogId) },
+      data: updateData,
+      include: {
+        company: true,
+        companyLocation: true,
+        priceList: true,
+        publications: {
+          include: {
+            products: true
+          }
+        }
+      }
+    });
+
+    return {
+      success: true,
+      catalog: updatedCatalog
+    };
+
+  } catch (error) {
+    console.error("Error updating catalog:", error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
 export async function createCatalog({
   admin,
   shop,

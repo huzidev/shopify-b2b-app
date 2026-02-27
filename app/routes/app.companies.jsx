@@ -163,7 +163,7 @@ export default function Companies() {
         onAction: () => navigate("/app"),
       }}
       primaryAction={
-        <Button variant="primary" onAction={() => navigate("/app/create-company")}>
+        <Button variant="primary" onClick={() => navigate("/app/create-company")}>
           Create company
         </Button>
       }
@@ -327,7 +327,7 @@ export default function Companies() {
                         checked={isSelected}
                         onChange={() => handleSelectRow(company.id)}
                       />
-                      <Link url={`/app/company/${company.id}`} monochrome removeUnderline={false}>
+                      <Link onClick={() => navigate(`/app/company/${company.id}`)} monochrome removeUnderline={false}>
                         <Text variant="bodyMd" tone="interactive">
                           {company.name}
                         </Text>
@@ -347,7 +347,7 @@ export default function Companies() {
                         </Badge>
                       </div>
                       <div style={{ textAlign: "right" }}>
-                        <Button variant="plain" tone="interactive">
+                        <Button variant="plain" tone="interactive" onClick={() => navigate(`/app/company/${company.id}`)}>
                           Edit
                         </Button>
                       </div>
