@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useFetcher, useLoaderData } from "react-router";
+import { useFetcher, useLoaderData, useNavigate } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { getCompanies } from "../models/company.server";
@@ -199,6 +199,7 @@ export default function AppCreateCatalog() {
   const [selectedCompanyId, setSelectedCompanyId] = useState("");
   const [selectedLocationId, setSelectedLocationId] = useState("");
   const [title, setTitle] = useState("");
+  const navigate = useNavigate();
 
   // Price List Form State
   const [priceListData, setPriceListData] = useState({

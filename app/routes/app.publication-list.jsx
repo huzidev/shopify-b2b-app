@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from "react";
-import { useFetcher, useLoaderData } from "react-router";
+import { useFetcher, useLoaderData, useNavigate } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { 
@@ -99,6 +99,7 @@ export default function Publications() {
   
   const perPage = 5;
   const isLoading = fetcher.state === "submitting";
+  const navigate = useNavigate();
 
   // Transform database publications to match UI format
   const transformedPublications = publications?.map(publication => ({

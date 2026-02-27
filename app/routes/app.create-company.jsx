@@ -1,4 +1,4 @@
-import { useFetcher, useActionData } from "react-router";
+import { useFetcher, useActionData, useNavigate } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { createCompany } from "../models/company.server";
@@ -57,6 +57,7 @@ export default function AppCreateCompany() {
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (fetcher.data?.success) {

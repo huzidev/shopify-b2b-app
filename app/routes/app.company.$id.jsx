@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from "react";
-import { useLoaderData, useActionData, useParams } from "react-router";
+import { useLoaderData, useActionData, useParams, useNavigate } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { getCompany, updateCompany } from "../models/company.server";
@@ -70,6 +70,7 @@ export default function CompanyDetail() {
   const [paymentTerms, setPaymentTerms] = useState("net30");
   const [notes, setNotes] = useState("");
   const [saved, setSaved] = useState(false);
+  const navigate = useNavigate();
 
   // If company not found
   if (!company) {

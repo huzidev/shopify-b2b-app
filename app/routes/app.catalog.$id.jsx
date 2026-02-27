@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from "react";
-import { useLoaderData, useParams } from "react-router";
+import { useLoaderData, useNavigate, useParams } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { getCatalog } from "../models/catalog.server";
@@ -50,6 +50,7 @@ export default function CatalogDetail() {
   const { catalog } = useLoaderData();
   const [selectedTab, setSelectedTab] = useState(0);
   const [searchValue, setSearchValue] = useState("");
+  const navigate = useNavigate();
 
   // If catalog not found
   if (!catalog) {

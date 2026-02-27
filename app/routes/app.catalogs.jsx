@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from "react";
-import { useLoaderData } from "react-router";
+import { useLoaderData, useNavigate } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { getCatalogs } from "../models/catalog.server";
@@ -46,6 +46,7 @@ export default function Catalogs() {
   const [sortPopoverActive, setSortPopoverActive] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const perPage = 5;
+  const navigate = useNavigate();
 
   // Transform database catalogs to match UI format
   const transformedCatalogs = catalogs?.map(catalog => ({

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { useFetcher, useLoaderData, useActionData } from "react-router";
+import { useFetcher, useLoaderData, useActionData, useNavigate } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { getPriceLists, createPriceList, updatePriceList, deletePriceList, bulkDeletePriceLists } from "../models/priceList.server";
@@ -112,6 +112,7 @@ export default function AppPriceList() {
   const [queryValue, setQueryValue] = useState('');
   const [adjustmentTypeFilter, setAdjustmentTypeFilter] = useState(undefined);
   const [sortSelected, setSortSelected] = useState(['name asc']);
+  const navigate = useNavigate();
 
   const resourceName = {
     singular: 'price list',
