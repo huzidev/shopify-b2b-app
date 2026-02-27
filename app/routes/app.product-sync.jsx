@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { useFetcher, useLoaderData, Link, useActionData } from "react-router";
+import { useFetcher, useLoaderData, Link, useActionData, useNavigate } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import {
@@ -158,6 +158,7 @@ export default function AppProductSync() {
   const [currentStats, setCurrentStats] = useState(stats);
   const [modalState, setModalState] = useState({ isOpen: false, type: null, productId: null, productIds: null, productTitle: null });
   const isLoading = fetcher.state === "submitting";
+  const navigate = useNavigate();
 
   // Search and filter state
   const [queryValue, setQueryValue] = useState('');

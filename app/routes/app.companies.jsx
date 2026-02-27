@@ -163,7 +163,7 @@ export default function Companies() {
         onAction: () => navigate("/app"),
       }}
       primaryAction={
-        <Button variant="primary" url="/app/create-company">
+        <Button variant="primary" onAction={() => navigate("/app/create-company")}>
           Create company
         </Button>
       }
