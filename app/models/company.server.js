@@ -1,5 +1,53 @@
 import prisma from "../db.server";
 
+// Get company by customer ID for quick order
+export async function getCompanyByCustomer(shop, customerId) {
+  try {
+    const dbShop = await prisma.shop.findUnique({
+      where: { shopDomain: shop }
+    });
+
+    if (!dbShop) {
+      return null;
+    }
+
+    // Look up company by customer ID using the new CompanyCustomer relationship
+    const customerGid = `gid://shopify/Customer/${customerId}`;
+    
+    const companyCustomer = await prisma.companyCustomer.findFirst({
+      where: {
+        shopId: dbShop.id,
+        shopifyCustomerId: customerGid
+      },
+      include: {
+        company: {
+          include: {
+            locations: {
+              include: {
+                catalogs: {
+                  include: {
+                    priceList: true,
+                    publications: {
+                      include: {
+                        products: true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    });
+
+    return companyCustomer?.company || null;
+  } catch (error) {
+    console.error("Error fetching company by customer:", error);
+    return null;
+  }
+}
+
 export async function getCompanies(shop) {
   try {
     const dbShop = await prisma.shop.findUnique({
@@ -106,18 +154,33 @@ export async function createCompany({
           company {
             id
             name
+            mainContact {
+              id
+              customer {
+                id
+                email
+                firstName
+                lastName
+              }
+            }
+            contacts(first: 10) {
+              edges {
+                node {
+                  id
+                  customer {
+                    id
+                    email
+                    firstName
+                    lastName
+                  }
+                }
+              }
+            }
             locations(first:1) {
               edges {
                 node {
                   id
                   name
-                }
-              }
-            }
-            contacts(first:1) {
-              edges {
-                node {
-                  id
                 }
               }
             }
@@ -143,7 +206,11 @@ export async function createCompany({
 
   const company = result.company;
   const locationId = company.locations.edges[0].node.id;
-  const contactId = company.contacts.edges[0].node.id;
+  
+  // Extract customer information from the response
+  const mainContact = company.mainContact;
+  const customer = mainContact.customer;
+  const contactId = mainContact.id;
 
   const catalogBase = await admin.graphql(`
     {
@@ -210,6 +277,20 @@ export async function createCompany({
     }
   });
 
+  // Save customer relationship to database
+  if (customer) {
+    await prisma.companyCustomer.create({
+      data: {
+        shopId: dbShop.id,
+        shopifyCustomerId: customer.id,
+        companyId: dbCompany.id,
+        email: customer.email,
+        firstName: customer.firstName,
+        lastName: customer.lastName,
+      }
+    });
+  }
+
   // Save company location to database
   const dbLocation = await prisma.companyLocation.create({
     data: {
@@ -229,7 +310,6 @@ export async function createCompany({
         shopifyId: catalog.id,
         title: catalog.title,
         status: catalog.status,
-        priceListShopifyId: priceListId,
         publicationShopifyId: publicationId,
       }
     });

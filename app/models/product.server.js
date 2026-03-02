@@ -1,5 +1,62 @@
 import db from "../db.server";
 
+// Get products for publication with variants and pricing
+export async function getProductsForPublication(shopId, publicationId, priceList = null) {
+  try {
+    const publicationProducts = await db.publicationProduct.findMany({
+      where: { publicationId: publicationId },
+    });
+
+    const products = [];
+
+    for (const pp of publicationProducts) {
+      const product = await db.product.findFirst({
+        where: { shopId: shopId, shopifyId: pp.productId },
+        include: { variants: true },
+      });
+
+      if (!product || product.variants.length === 0) continue;
+
+      const variant = product.variants[0];
+      const originalPrice = parseFloat(variant.price);
+      let adjustedPrice = originalPrice;
+      let adjustmentValue = 0;
+
+      // Apply price adjustment if price list exists
+      if (priceList && priceList.adjustmentValue) {
+        adjustmentValue = typeof priceList.adjustmentValue === 'object' && priceList.adjustmentValue.d 
+          ? priceList.adjustmentValue.d[0] 
+          : parseFloat(priceList.adjustmentValue);
+
+        if (priceList.adjustmentType === "PERCENTAGE_INCREASE") {
+          adjustedPrice = originalPrice * (1 + adjustmentValue / 100);
+        } else if (priceList.adjustmentType === "PERCENTAGE_DECREASE") {
+          adjustedPrice = originalPrice * (1 - adjustmentValue / 100);
+        } else if (priceList.adjustmentType === "FIXED_AMOUNT") {
+          adjustedPrice = originalPrice + adjustmentValue;
+        }
+      }
+
+      products.push({
+        id: product.id,
+        shopifyId: product.shopifyId,
+        title: product.title,
+        sku: variant.sku || "",
+        variantId: variant.shopifyId,
+        originalPrice: originalPrice.toFixed(2),
+        adjustedPrice: adjustedPrice.toFixed(2),
+        hasDiscount: priceList && adjustedPrice < originalPrice,
+        inventory: variant.inventory || 0,
+      });
+    }
+
+    return products;
+  } catch (error) {
+    console.error("Error fetching products for publication:", error);
+    return [];
+  }
+}
+
 // Get products by their Shopify IDs with detailed information
 export async function getProductsByIds(admin, productIds) {
   if (!productIds || productIds.length === 0) return [];

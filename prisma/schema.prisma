@@ -39,6 +39,7 @@ model Shop {
   catalogs    Catalog[]
   priceLists  PriceList[]
   publications Publication[]
+  companyCustomers CompanyCustomer[]
 
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -91,7 +92,7 @@ model Variant {
 model Company {
   id                Int                @id @default(autoincrement())
   shopId            Int
-  shopifyId         String
+  shopifyId         String             // Company GID
   locationShopifyId String?
   contactShopifyId  String?
 
@@ -99,6 +100,7 @@ model Company {
   orders            Order[]
   catalogs          Catalog[]          
   locations         CompanyLocation[]  
+  customers         CompanyCustomer[]  // Customer relationships
   shop              Shop               @relation(fields: [shopId], references: [id])
 
   @@unique([shopifyId, shopId])
@@ -114,6 +116,21 @@ model CompanyLocation {
   catalogs      Catalog[] 
 
   @@unique([shopifyId])
+}
+
+model CompanyCustomer {
+  id                Int     @id @default(autoincrement())
+  shopId            Int
+  shopifyCustomerId String  // Customer GID like gid://shopify/Customer/1073339466
+  companyId         Int
+  email             String?
+  firstName         String?
+  lastName          String?
+
+  company           Company @relation(fields: [companyId], references: [id])
+  shop              Shop    @relation(fields: [shopId], references: [id])
+
+  @@unique([shopifyCustomerId, shopId])
 }
 
 model Catalog {

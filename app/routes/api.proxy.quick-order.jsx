@@ -1,6 +1,8 @@
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
 import { createOrder, getCustomerOrderHistory } from "../models/order.server";
+import { getCompanyByCustomer } from "../models/company.server";
+import { getProductsForPublication } from "../models/product.server";
 
 // Handle POST request for order creation
 export const action = async ({ request }) => {
@@ -88,12 +90,10 @@ export const loader = async ({ request }) => {
     `);
   }
 
-  // 2️⃣ Find the company for this logged-in customer
-  const company = await db.company.findFirst({
-    where: {
-      shopId: shopRecord.id,
-    },
-  });
+  console.log("SW what is customerId", customerId);
+
+  // 2️⃣ Find the company for this logged-in customer using model function
+  const company = await getCompanyByCustomer(shop, customerId);
 
   if (!company) {
     return liquid(`
@@ -106,109 +106,190 @@ export const loader = async ({ request }) => {
 
   console.log("SW what company matched:", company.shopifyId, company.name);
 
-  // 3️⃣ Get first catalog with publications and priceList
-  const catalog = await db.catalog.findFirst({
-    where: { companyId: company.id },
-    include: { publications: true, priceList: true },
-  });
-
-  console.log("SW what is catalog", catalog);
-
-  if (!catalog || catalog.publications.length === 0) {
+  // 3️⃣ Get all locations and their catalogs
+  if (!company || !company.locations || company.locations.length === 0) {
     return liquid(`
       <div class="quick-order-error">
-        <h2>No Products Available</h2>
-        <p>No publications found for this company.</p>
+        <h2>No Locations Found</h2>
+        <p>No locations found for this company.</p>
       </div>
     `);
   }
 
-  const publication = catalog.publications[0];
+  const locationData = [];
 
-  console.log("SW what is publication", publication);
+  // Process each location and ALL its catalogs
+  for (const location of company.locations) {
+    if (location.catalogs.length === 0) {
+      // Location has no catalogs
+      locationData.push({
+        locationId: location.id,
+        locationName: location.name,
+        catalogId: null,
+        catalogTitle: null,
+        priceList: null,
+        products: [],
+        hasNoCatalogs: true
+      });
+      continue;
+    }
 
-  // 4️⃣ Get products in publication
-  const publicationProducts = await db.publicationProduct.findMany({
-    where: { publicationId: publication.id },
-  });
+    // Process ALL catalogs for this location
+    for (const catalog of location.catalogs) {
+      if (!catalog.publications || catalog.publications.length === 0) {
+        // Catalog has no publications
+        locationData.push({
+          locationId: location.id,
+          locationName: location.name,
+          catalogId: catalog.id,
+          catalogTitle: catalog.title,
+          priceList: catalog.priceList,
+          products: [],
+          hasNoProducts: true
+        });
+        continue;
+      }
 
-  console.log("SW what is publicationProducts", publicationProducts);
+      // Process all publications in this catalog
+      let allProducts = [];
+      for (const publication of catalog.publications) {
+        const products = await getProductsForPublication(shopRecord.id, publication.id, catalog.priceList);
+        allProducts = [...allProducts, ...products];
+      }
 
-  // Get price list info for display
-  const priceList = catalog.priceList;
-  let adjustmentText = "";
-  let adjustmentValue = 0;
-
-  if (priceList) {
-    adjustmentValue = typeof priceList.adjustmentValue === 'object' && priceList.adjustmentValue.d 
-      ? priceList.adjustmentValue.d[0] 
-      : parseFloat(priceList.adjustmentValue);
-
-    if (priceList.adjustmentType === "PERCENTAGE_DECREASE") {
-      adjustmentText = `${adjustmentValue}% OFF`;
-    } else if (priceList.adjustmentType === "PERCENTAGE_INCREASE") {
-      adjustmentText = `${adjustmentValue}% Markup`;
-    } else if (priceList.adjustmentType === "FIXED_AMOUNT") {
-      adjustmentText = `$${adjustmentValue} adjustment`;
+      locationData.push({
+        locationId: location.id,
+        locationName: location.name,
+        catalogId: catalog.id,
+        catalogTitle: catalog.title,
+        priceList: catalog.priceList,
+        products: allProducts,
+        hasNoProducts: allProducts.length === 0
+      });
     }
   }
 
-  const currency = priceList?.currency || "USD";
-  const products = [];
+  console.log("SW what is location data", locationData);
 
-  for (const pp of publicationProducts) {
-    const product = await db.product.findFirst({
-      where: { shopId: shopRecord.id, shopifyId: pp.productId },
-      include: { variants: true },
-    });
+  // Generate HTML for products grouped by location and catalog
+  const locationSections = locationData.map((locationInfo, locationIndex) => {
+    // Handle location with no catalogs
+    if (locationInfo.hasNoCatalogs) {
+      return `
+        <div class="location-section">
+          <div class="location-header">
+            <h3>${locationInfo.locationName}</h3>
+          </div>
+          <table class="location-table">
+            <thead>
+              <tr>
+                <th colspan="4" style="text-align: center; color: #666;">No catalogs for ${locationInfo.locationName}</th>
+              </tr>
+            </thead>
+          </table>
+        </div>
+      `;
+    }
 
-    if (!product || product.variants.length === 0) continue;
+    // Handle catalog with no products
+    if (locationInfo.hasNoProducts) {
+      let adjustmentText = "";
+      const priceList = locationInfo.priceList;
+      
+      if (priceList) {
+        const adjustmentValue = typeof priceList.adjustmentValue === 'object' && priceList.adjustmentValue.d 
+          ? priceList.adjustmentValue.d[0] 
+          : parseFloat(priceList.adjustmentValue);
 
-    const variant = product.variants[0];
-    const originalPrice = parseFloat(variant.price);
-    let adjustedPrice = originalPrice;
+        if (priceList.adjustmentType === "PERCENTAGE_DECREASE") {
+          adjustmentText = `${adjustmentValue}% OFF`;
+        } else if (priceList.adjustmentType === "PERCENTAGE_INCREASE") {
+          adjustmentText = `${adjustmentValue}% Markup`;
+        } else if (priceList.adjustmentType === "FIXED_AMOUNT") {
+          adjustmentText = `$${adjustmentValue} adjustment`;
+        }
+      }
 
-    // Apply price adjustment
+      return `
+        <div class="location-section">
+          <div class="location-header">
+            <h3>${locationInfo.locationName} - ${locationInfo.catalogTitle}</h3>
+            ${adjustmentText ? `<span class="discount-badge">${adjustmentText}</span>` : ""}
+          </div>
+          <table class="location-table">
+            <thead>
+              <tr>
+                <th colspan="4" style="text-align: center; color: #666;">No products available in this catalog</th>
+              </tr>
+            </thead>
+          </table>
+        </div>
+      `;
+    }
+
+    // Generate adjustment text for this catalog's price list
+    let adjustmentText = "";
+    let adjustmentValue = 0;
+    const priceList = locationInfo.priceList;
+
     if (priceList) {
-      if (priceList.adjustmentType === "PERCENTAGE_INCREASE") {
-        adjustedPrice = originalPrice * (1 + adjustmentValue / 100);
-      } else if (priceList.adjustmentType === "PERCENTAGE_DECREASE") {
-        adjustedPrice = originalPrice * (1 - adjustmentValue / 100);
+      adjustmentValue = typeof priceList.adjustmentValue === 'object' && priceList.adjustmentValue.d 
+        ? priceList.adjustmentValue.d[0] 
+        : parseFloat(priceList.adjustmentValue);
+
+      if (priceList.adjustmentType === "PERCENTAGE_DECREASE") {
+        adjustmentText = `${adjustmentValue}% OFF`;
+      } else if (priceList.adjustmentType === "PERCENTAGE_INCREASE") {
+        adjustmentText = `${adjustmentValue}% Markup`;
       } else if (priceList.adjustmentType === "FIXED_AMOUNT") {
-        adjustedPrice = originalPrice + adjustmentValue;
+        adjustmentText = `$${adjustmentValue} adjustment`;
       }
     }
 
-    products.push({
-      id: product.id,
-      shopifyId: product.shopifyId,
-      title: product.title,
-      sku: variant.sku || "",
-      variantId: variant.shopifyId,
-      originalPrice: originalPrice.toFixed(2),
-      adjustedPrice: adjustedPrice.toFixed(2),
-      hasDiscount: priceList && adjustedPrice < originalPrice,
-      inventory: variant.inventory || 0,
-    });
-  }
+    const productRows = locationInfo.products.map((p, productIndex) => `
+      <tr data-location-id="${locationInfo.locationId}" data-catalog-id="${locationInfo.catalogId}" data-product-id="${p.id}" data-title="${p.title}" data-price="${p.adjustedPrice}">
+        <td>${p.title}</td>
+        <td>
+          ${p.hasDiscount 
+            ? `<span class="original-price">$${p.originalPrice}</span> <span class="adjusted-price">$${p.adjustedPrice}</span>`
+            : `<span class="adjusted-price">$${p.adjustedPrice}</span>`
+          }
+        </td>
+        <td>${p.inventory}</td>
+        <td><input type="number" class="qty-input" data-location-index="${locationIndex}" data-product-index="${productIndex}" min="0" value="0" /></td>
+      </tr>
+    `).join("");
 
-  // Generate product rows HTML with original vs adjusted price
-  const productRows = products.map((p, index) => `
-    <tr data-product-id="${p.id}" data-title="${p.title}" data-price="${p.adjustedPrice}">
-      <td>${p.title}</td>
-      <td>
-        ${p.hasDiscount 
-          ? `<span class="original-price">$${p.originalPrice}</span> <span class="adjusted-price">$${p.adjustedPrice}</span>`
-          : `<span class="adjusted-price">$${p.adjustedPrice}</span>`
-        }
-      </td>
-      <td>${p.inventory}</td>
-      <td><input type="number" class="qty-input" data-index="${index}" min="0" value="0" /></td>
-    </tr>
-  `).join("");
+    return `
+      <div class="location-section">
+        <div class="location-header">
+          <h3>${locationInfo.locationName} - ${locationInfo.catalogTitle}</h3>
+          ${adjustmentText ? `<span class="discount-badge">${adjustmentText}</span>` : ""}
+        </div>
+        
+        <table class="location-table">
+          <thead>
+            <tr>
+              <th>Product</th>
+              <th>Price</th>
+              <th>Inventory</th>
+              <th>Qty</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${productRows}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }).join("");
 
-  // Serialize products for JavaScript
-  const productsJson = JSON.stringify(products);
+  // Get currency from first location's price list that has one
+  const locationWithPriceList = locationData.find(loc => loc.priceList);
+  const currency = locationWithPriceList?.priceList?.currency || "USD";
+
+  // Serialize location data for JavaScript
+  const locationDataJson = JSON.stringify(locationData);
 
   // 5️⃣ Fetch customer order history
   let orderHistory = [];
@@ -233,8 +314,12 @@ export const loader = async ({ request }) => {
 
   return liquid(`
     <style>
-      .quick-order-container { font-family: inherit; max-width: 900px; margin: 0 auto; }
-      .quick-order-container table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+      .quick-order-container { font-family: inherit; max-width: 1200px; margin: 0 auto; }
+      .location-section { margin: 30px 0; padding: 20px; border: 1px solid #ddd; border-radius: 8px; }
+      .location-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; flex-wrap: wrap; }
+      .location-header h3 { margin: 0; color: #333; }
+      .catalog-info { color: #666; font-style: italic; }
+      .location-table { width: 100%; border-collapse: collapse; margin-top: 15px; }
       .quick-order-container th, .quick-order-container td { border: 1px solid #ddd; padding: 12px 8px; text-align: left; }
       .quick-order-container th { background: #f4f4f4; font-weight: 600; }
       .quick-order-container input[type="number"] { width: 70px; padding: 8px; border: 1px solid #ccc; border-radius: 4px; text-align: center; }
@@ -260,38 +345,28 @@ export const loader = async ({ request }) => {
       }
       .btn-order:hover { background: #0056b3; }
       .btn-order:disabled { background: #ccc; cursor: not-allowed; }
-      .header-info { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; }
+      .header-info { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; margin-bottom: 20px; }
       .header-info h1 { margin: 0; }
       .order-history { margin-top: 40px; padding-top: 30px; border-top: 2px solid #eee; }
       .order-history h2 { margin: 0 0 15px 0; color: #333; }
-      .order-history table { font-size: 0.95em; }
-      .order-history td { vertical-align: top; }
+      .order-history table { font-size: 0.95em; width: 100%; border-collapse: collapse; }
+      .order-history td { vertical-align: top; padding: 12px 8px; border: 1px solid #ddd; }
       .order-history .items-col { max-width: 300px; font-size: 0.9em; color: #666; }
+      .locations-container { margin-top: 20px; }
     </style>
 
     <div class="quick-order-container">
       <div class="header-info">
         <h1>Quick Order - ${company.name}</h1>
-        ${adjustmentText ? `<span class="discount-badge">${adjustmentText}</span>` : ""}
       </div>
       <p>Shop: {{shop.name}} | Currency: ${currency}</p>
       
       <form id="quickOrderForm" method="POST">
         <input type="hidden" name="orderData" id="orderDataInput" />
         
-        <table>
-          <thead>
-            <tr>
-              <th>Product</th>
-              <th>Price</th>
-              <th>Inventory</th>
-              <th>Qty</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${productRows}
-          </tbody>
-        </table>
+        <div class="locations-container">
+          ${locationSections}
+        </div>
 
         <div class="order-summary">
           <h3>Order Summary</h3>
@@ -321,7 +396,7 @@ export const loader = async ({ request }) => {
 
     <script>
       (function() {
-        const products = ${productsJson};
+        const locationData = ${locationDataJson};
         const currency = "${currency}";
         const form = document.getElementById('quickOrderForm');
         const orderDataInput = document.getElementById('orderDataInput');
@@ -334,16 +409,23 @@ export const loader = async ({ request }) => {
           let totalAmount = 0;
           const lineItems = [];
           
-          document.querySelectorAll('.qty-input').forEach((input, index) => {
+          document.querySelectorAll('.qty-input').forEach((input) => {
             const qty = parseInt(input.value) || 0;
-            if (qty > 0 && products[index]) {
+            const locationIndex = parseInt(input.dataset.locationIndex);
+            const productIndex = parseInt(input.dataset.productIndex);
+            
+            if (qty > 0 && locationData[locationIndex] && locationData[locationIndex].products && locationData[locationIndex].products[productIndex]) {
+              const location = locationData[locationIndex];
+              const product = location.products[productIndex];
               totalItems += qty;
-              const price = parseFloat(products[index].adjustedPrice);
+              const price = parseFloat(product.adjustedPrice);
               totalAmount += price * qty;
               lineItems.push({
-                title: products[index].title,
-                price: products[index].adjustedPrice,
-                quantity: qty
+                title: product.title,
+                price: product.adjustedPrice,
+                quantity: qty,
+                locationName: location.locationName,
+                catalogTitle: location.catalogTitle || 'Unknown Catalog'
               });
             }
           });
