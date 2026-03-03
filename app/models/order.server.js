@@ -1,7 +1,15 @@
 import db from "../db.server";
 
 export async function createOrder(admin, orderData) {
-  const { currency, lineItems, customerId, companyId } = orderData;
+  const { 
+    currency, 
+    lineItems, 
+    customerId, 
+    companyId, 
+    companyShopifyId, 
+    companyLocationId, 
+    shopId 
+  } = orderData;
 
   // Calculate total amount from line items
   const totalAmount = lineItems.reduce((sum, item) => {
@@ -11,6 +19,7 @@ export async function createOrder(admin, orderData) {
   const variables = {
     order: {
       currency: currency || "USD",
+      customerId: customerId ? `gid://shopify/Customer/${customerId}` : null,
       lineItems: lineItems.map(item => ({
         title: item.title,
         priceSet: {
@@ -36,6 +45,16 @@ export async function createOrder(admin, orderData) {
     }
   };
 
+  // Add companyLocationId if available
+  if (companyLocationId) {
+    variables.order.companyLocationId = companyLocationId;
+  }
+
+  // Remove customerId if not provided to avoid GraphQL errors
+  if (!customerId) {
+    delete variables.order.customerId;
+  }
+
   const response = await admin.graphql(
     `#graphql
     mutation orderCreate($order: OrderCreateOrderInput!, $options: OrderCreateOptionsInput) {
@@ -60,6 +79,8 @@ export async function createOrder(admin, orderData) {
               quantity
             }
           }
+          createdAt
+          updatedAt
         }
       }
     }`,
@@ -67,15 +88,71 @@ export async function createOrder(admin, orderData) {
   );
 
   const json = await response.json();
-  return json.data.orderCreate;
+  const result = json.data.orderCreate;
+
+  // If order was created successfully, save to local database
+  if (result.order && !result.userErrors?.length && shopId) {
+    try {
+      const orderNumber = result.order.name;
+      const shopifyOrderId = result.order.id;
+      const totalPrice = parseFloat(result.order.totalPriceSet?.shopMoney?.amount || "0");
+      const orderCurrency = result.order.totalPriceSet?.shopMoney?.currencyCode || currency || "USD";
+
+      // Save order to local database
+      const savedOrder = await db.order.create({
+        data: {
+          shopId: shopId,
+          shopifyId: shopifyOrderId,
+          companyId: companyId || null,
+          orderNumber: orderNumber,
+          totalPrice: totalPrice,
+          currency: orderCurrency,
+        }
+      });
+
+      console.log("SW Order saved to local DB:", savedOrder);
+
+      // Save order items
+      if (result.order.lineItems?.nodes?.length > 0) {
+        for (let i = 0; i < result.order.lineItems.nodes.length; i++) {
+          const lineItem = result.order.lineItems.nodes[i];
+          const originalLineItem = lineItems[i];
+
+          if (originalLineItem) {
+            // Find the variant in our database to get the variant ID
+            const variant = await db.variant.findFirst({
+              where: {
+                shopId: shopId,
+                // We might need to match by product title or SKU since we don't have variant shopify ID directly
+                product: {
+                  title: lineItem.title
+                }
+              }
+            });
+
+            if (variant) {
+              await db.orderItem.create({
+                data: {
+                  orderId: savedOrder.id,
+                  variantId: variant.id,
+                  quantity: lineItem.quantity,
+                  price: parseFloat(originalLineItem.price),
+                }
+              });
+            }
+          }
+        }
+      }
+
+    } catch (dbError) {
+      console.error("Error saving order to local database:", dbError);
+      // Don't fail the order creation if DB save fails
+    }
+  }
+
+  return result;
 }
 
-/**
- * Get products with pricing for quick order
- * @param {number} shopId - Shop ID
- * @param {number} companyId - Company ID
- * @returns {Promise<object>} - Products with pricing info
- */
 export async function getQuickOrderProducts(shopId, companyId) {
   const catalog = await db.catalog.findFirst({
     where: { companyId },
@@ -142,12 +219,6 @@ export async function getQuickOrderProducts(shopId, companyId) {
   };
 }
 
-/**
- * Get customer order history via Shopify GraphQL Admin API
- * @param {object} admin - Shopify Admin GraphQL client
- * @param {string} customerId - Customer ID (numeric, not GID)
- * @returns {Promise<array>} - Array of order history
- */
 export async function getCustomerOrderHistory(admin, customerId) {
   const customerGid = `gid://shopify/Customer/${customerId}`;
   

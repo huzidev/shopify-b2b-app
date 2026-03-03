@@ -24,33 +24,269 @@ export const action = async ({ request }) => {
 
   try {
     const orderData = JSON.parse(orderDataRaw);
-    const result = await createOrder(admin, orderData);
+    console.log("SW what is orderData in Action", orderData);
+
+    // Get additional context for order creation 
+    const url = new URL(request.url);
+    const shop = url.searchParams.get("shop");
+    const customerId = url.searchParams.get("logged_in_customer_id");
+
+    // Get shop record
+    const shopRecord = await db.shop.findUnique({
+      where: { shopDomain: shop },
+    });
+
+    // Get company information
+    const company = await getCompanyByCustomer(shop, customerId);
+
+    // Group line items by location to handle multi-location orders
+    // Each line item now includes locationShopifyId from the loader data
+    const locationGroups = orderData.lineItems.reduce((groups, item) => {
+      const locationKey = item.locationShopifyId || 'no-location';
+      if (!groups[locationKey]) {
+        groups[locationKey] = {
+          companyLocationId: item.locationShopifyId,
+          locationName: item.locationName,
+          items: []
+        };
+      }
+      groups[locationKey].items.push(item);
+      return groups;
+    }, {});
+
+    // For now, handle the primary location (most common case)
+    // TODO: In future, we could create multiple orders for multiple locations
+    const primaryLocationKey = Object.keys(locationGroups)[0];
+    const primaryLocation = locationGroups[primaryLocationKey];
+    const companyLocationId = primaryLocation?.companyLocationId || null;
+
+    // Enhanced order data with additional context
+    const enhancedOrderData = {
+      ...orderData,
+      customerId,
+      companyId: company?.id,
+      companyShopifyId: company?.shopifyId,
+      companyLocationId,
+      shopId: shopRecord?.id
+    };
+
+    console.log("SW what is enhancedOrderData", enhancedOrderData);
+
+    const result = await createOrder(admin, enhancedOrderData);
+
+    console.log("SW what is result of order", JSON.stringify(result, null, 2));
 
     if (result.userErrors && result.userErrors.length > 0) {
       return liquid(`
+        <style>
+          .quick-order-error { 
+            padding: 30px; 
+            background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%); 
+            border: 1px solid #ffc107; 
+            border-radius: 12px; 
+            margin: 20px; 
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            text-align: center;
+          }
+          .quick-order-error h2 { 
+            color: #856404; 
+            margin: 0 0 15px 0; 
+            font-size: 1.5em; 
+          }
+          .quick-order-error p { 
+            color: #856404; 
+            margin: 10px 0; 
+            line-height: 1.5;
+          }
+          .quick-order-error a { 
+            background: #dc3545; 
+            color: white; 
+            padding: 12px 24px; 
+            text-decoration: none; 
+            border-radius: 6px; 
+            display: inline-block; 
+            margin-top: 15px; 
+            transition: all 0.3s ease;
+          }
+          .quick-order-error a:hover { 
+            background: #c82333; 
+            transform: translateY(-2px);
+          }
+        </style>
         <div class="quick-order-error">
-          <h2>Order Failed</h2>
+          <h2>⚠️ Order Failed</h2>
           <p>${result.userErrors.map(e => e.message).join(", ")}</p>
-          <a href="javascript:history.back()">Go Back</a>
+          <a href="javascript:history.back()">🔙 Go Back</a>
         </div>
       `);
     }
 
+    const orderTotal = parseFloat(result.order?.totalPriceSet?.shopMoney?.amount || "0");
+    const itemCount = orderData.lineItems.reduce((sum, item) => sum + item.quantity, 0);
+
     return liquid(`
+      <style>
+        .quick-order-success { 
+          padding: 40px; 
+          background: linear-gradient(135deg, #d4edda 0%, #b7f4c7 100%); 
+          border: 1px solid #28a745; 
+          border-radius: 16px; 
+          margin: 20px; 
+          box-shadow: 0 6px 20px rgba(0,0,0,0.1);
+          text-align: center;
+          position: relative;
+          overflow: hidden;
+        }
+        .quick-order-success::before {
+          content: '';
+          position: absolute;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="20" cy="20" r="2" fill="rgba(255,255,255,0.3)"/><circle cx="80" cy="80" r="3" fill="rgba(255,255,255,0.2)"/></svg>') repeat;
+          pointer-events: none;
+        }
+        .quick-order-success h2 { 
+          color: #155724; 
+          margin: 0 0 20px 0; 
+          font-size: 2em; 
+          position: relative;
+          z-index: 1;
+        }
+        .quick-order-success .success-icon {
+          font-size: 3em;
+          color: #28a745;
+          margin-bottom: 15px;
+          display: block;
+          position: relative;
+          z-index: 1;
+        }
+        .quick-order-success .order-details { 
+          background: rgba(255,255,255,0.8); 
+          padding: 20px; 
+          border-radius: 12px; 
+          margin: 20px 0;
+          position: relative;
+          z-index: 1;
+        }
+        .quick-order-success .order-details h3 { 
+          color: #155724; 
+          margin: 0 0 10px 0; 
+          font-size: 1.3em;
+        }
+        .quick-order-success .detail-row { 
+          display: flex; 
+          justify-content: space-between; 
+          margin: 8px 0; 
+          padding: 8px 0;
+          border-bottom: 1px solid rgba(21,87,36,0.1);
+        }
+        .quick-order-success .detail-label { 
+          font-weight: 600; 
+          color: #155724; 
+        }
+        .quick-order-success .detail-value { 
+          color: #495057; 
+          font-weight: 500;
+        }
+        .quick-order-success .total-amount {
+          font-size: 1.4em;
+          font-weight: bold;
+          color: #28a745;
+        }
+        .quick-order-success a { 
+          background: linear-gradient(135deg, #007bff 0%, #0056b3 100%); 
+          color: white; 
+          padding: 15px 30px; 
+          text-decoration: none; 
+          border-radius: 8px; 
+          display: inline-block; 
+          margin-top: 20px; 
+          font-weight: 600;
+          transition: all 0.3s ease;
+          position: relative;
+          z-index: 1;
+          box-shadow: 0 4px 12px rgba(0,123,255,0.3);
+        }
+        .quick-order-success a:hover { 
+          transform: translateY(-3px);
+          box-shadow: 0 6px 18px rgba(0,123,255,0.4);
+        }
+      </style>
       <div class="quick-order-success">
+        <span class="success-icon">🎉</span>
         <h2>Order Created Successfully!</h2>
-        <p>Order Number: ${result.order?.name || "N/A"}</p>
-        <p>Total: ${result.order?.totalPriceSet?.shopMoney?.amount || "0"} ${result.order?.totalPriceSet?.shopMoney?.currencyCode || "USD"}</p>
-        <a href="javascript:history.back()">Place Another Order</a>
+        
+        <div class="order-details">
+          <h3>Order Summary</h3>
+          <div class="detail-row">
+            <span class="detail-label">Order Number:</span>
+            <span class="detail-value">${result.order?.name || "N/A"}</span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-label">Items Ordered:</span>
+            <span class="detail-value">${itemCount} item${itemCount !== 1 ? 's' : ''}</span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-label">Company:</span>
+            <span class="detail-value">${company?.name || "N/A"}</span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-label">Location:</span>
+            <span class="detail-value">${primaryLocation?.locationName || "N/A"}</span>
+          </div>
+          <div class="detail-row" style="border-bottom: 2px solid #28a745; padding-bottom: 12px;">
+            <span class="detail-label">Total Amount:</span>
+            <span class="detail-value total-amount">$${orderTotal.toFixed(2)} ${result.order?.totalPriceSet?.shopMoney?.currencyCode || "USD"}</span>
+          </div>
+        </div>
+        
+        <a href="javascript:history.back()">🛍️ Place Another Order</a>
       </div>
     `);
   } catch (error) {
     console.error("Order creation error:", error);
     return liquid(`
+      <style>
+        .quick-order-error { 
+          padding: 30px; 
+          background: linear-gradient(135deg, #f8d7da 0%, #f1aeb5 100%); 
+          border: 1px solid #dc3545; 
+          border-radius: 12px; 
+          margin: 20px; 
+          box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+          text-align: center;
+        }
+        .quick-order-error h2 { 
+          color: #721c24; 
+          margin: 0 0 15px 0; 
+          font-size: 1.5em; 
+        }
+        .quick-order-error p { 
+          color: #721c24; 
+          margin: 10px 0; 
+          line-height: 1.5;
+        }
+        .quick-order-error a { 
+          background: #dc3545; 
+          color: white; 
+          padding: 12px 24px; 
+          text-decoration: none; 
+          border-radius: 6px; 
+          display: inline-block; 
+          margin-top: 15px; 
+          transition: all 0.3s ease;
+        }
+        .quick-order-error a:hover { 
+          background: #c82333; 
+          transform: translateY(-2px);
+        }
+      </style>
       <div class="quick-order-error">
-        <h2>Error</h2>
+        <h2>❌ Error</h2>
         <p>Failed to create order: ${error.message}</p>
-        <a href="javascript:history.back()">Go Back</a>
+        <a href="javascript:history.back()">🔙 Go Back</a>
       </div>
     `);
   }
@@ -125,6 +361,7 @@ export const loader = async ({ request }) => {
       locationData.push({
         locationId: location.id,
         locationName: location.name,
+        locationShopifyId: location.shopifyId, // Add shopify ID for order creation
         catalogId: null,
         catalogTitle: null,
         priceList: null,
@@ -141,6 +378,7 @@ export const loader = async ({ request }) => {
         locationData.push({
           locationId: location.id,
           locationName: location.name,
+          locationShopifyId: location.shopifyId, // Add shopify ID
           catalogId: catalog.id,
           catalogTitle: catalog.title,
           priceList: catalog.priceList,
@@ -160,6 +398,7 @@ export const loader = async ({ request }) => {
       locationData.push({
         locationId: location.id,
         locationName: location.name,
+        locationShopifyId: location.shopifyId, // Add shopify ID
         catalogId: catalog.id,
         catalogTitle: catalog.title,
         priceList: catalog.priceList,
@@ -288,9 +527,6 @@ export const loader = async ({ request }) => {
   const locationWithPriceList = locationData.find(loc => loc.priceList);
   const currency = locationWithPriceList?.priceList?.currency || "USD";
 
-  // Serialize location data for JavaScript
-  const locationDataJson = JSON.stringify(locationData);
-
   // 5️⃣ Fetch customer order history
   let orderHistory = [];
   try {
@@ -300,17 +536,26 @@ export const loader = async ({ request }) => {
     console.error("Error fetching order history:", error);
   }
 
+  // Serialize location data and order history for JavaScript
+  const locationDataJson = JSON.stringify(locationData);
+  const orderHistoryJson = JSON.stringify(orderHistory);
+
   // Generate order history rows
   const orderHistoryRows = orderHistory.length > 0 
-    ? orderHistory.map(order => `
+    ? orderHistory.map((order, orderIndex) => `
       <tr>
         <td><strong>${order.name}</strong></td>
         <td>${order.createdAt}</td>
         <td>${order.items.map(i => `${i.title} (x${i.quantity})`).join(", ") || "No items"}</td>
         <td>$${parseFloat(order.total).toFixed(2)} ${order.currency}</td>
+        <td>
+          <button type="button" class="btn-reorder" onclick="reorderItems(${orderIndex})" title="Re-order these items">
+            🔄 Re-order
+          </button>
+        </td>
       </tr>
     `).join("")
-    : `<tr><td colspan="4" style="text-align: center; padding: 20px;">No order history found</td></tr>`;
+    : `<tr><td colspan="5" style="text-align: center; padding: 20px;">No order history found</td></tr>`;
 
   return liquid(`
     <style>
@@ -352,6 +597,22 @@ export const loader = async ({ request }) => {
       .order-history table { font-size: 0.95em; width: 100%; border-collapse: collapse; }
       .order-history td { vertical-align: top; padding: 12px 8px; border: 1px solid #ddd; }
       .order-history .items-col { max-width: 300px; font-size: 0.9em; color: #666; }
+      .btn-reorder { 
+        background: linear-gradient(135deg, #28a745 0%, #20c997 100%); 
+        color: white; 
+        border: none; 
+        padding: 8px 16px; 
+        border-radius: 6px; 
+        font-size: 0.9em; 
+        cursor: pointer; 
+        transition: all 0.3s ease;
+        box-shadow: 0 2px 8px rgba(40,167,69,0.3);
+      }
+      .btn-reorder:hover { 
+        background: linear-gradient(135deg, #20c997 0%, #28a745 100%); 
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(40,167,69,0.4);
+      }
       .locations-container { margin-top: 20px; }
     </style>
 
@@ -385,6 +646,7 @@ export const loader = async ({ request }) => {
               <th>Date</th>
               <th>Items</th>
               <th>Total</th>
+              <th>Action</th>
             </tr>
           </thead>
           <tbody>
@@ -397,12 +659,102 @@ export const loader = async ({ request }) => {
     <script>
       (function() {
         const locationData = ${locationDataJson};
+        const orderHistory = ${orderHistoryJson};
         const currency = "${currency}";
         const form = document.getElementById('quickOrderForm');
         const orderDataInput = document.getElementById('orderDataInput');
         const totalItemsEl = document.getElementById('totalItems');
         const orderTotalEl = document.getElementById('orderTotal');
         const orderBtn = document.getElementById('orderBtn');
+        
+        // Re-order function - directly creates order
+        window.reorderItems = function(orderIndex) {
+          const order = orderHistory[orderIndex];
+          if (!order || !order.items) {
+            alert('Unable to re-order: Order data not found');
+            return;
+          }
+
+          // Convert order history items to line items format
+          const lineItems = [];
+          let matchedItems = 0;
+
+          // Try to match each order item with current products to get current pricing
+          order.items.forEach(orderItem => {
+            let matched = false;
+
+            // Search through all locations and products for current pricing
+            locationData.forEach((location) => {
+              if (location.products && !matched) {
+                location.products.forEach((product) => {
+                  // Match by product title (case-insensitive)
+                  if (!matched && product.title.toLowerCase() === orderItem.title.toLowerCase()) {
+                    lineItems.push({
+                      title: product.title,
+                      price: product.adjustedPrice,
+                      quantity: orderItem.quantity,
+                      locationName: location.locationName,
+                      locationShopifyId: location.locationShopifyId,
+                      catalogTitle: location.catalogTitle || 'Unknown Catalog'
+                    });
+                    matched = true;
+                    matchedItems++;
+                  }
+                });
+              }
+            });
+
+            // If product not found in current catalogs, use original order data
+            if (!matched) {
+              // Find the first available location as fallback
+              const fallbackLocation = locationData.find(loc => loc.locationShopifyId);
+              
+              lineItems.push({
+                title: orderItem.title,
+                price: (parseFloat(order.total) / order.items.reduce((sum, item) => sum + item.quantity, 0)).toFixed(2), // Estimate price
+                quantity: orderItem.quantity,
+                locationName: fallbackLocation?.locationName || 'Unknown Location',
+                locationShopifyId: fallbackLocation?.locationShopifyId || null,
+                catalogTitle: 'Previous Order'
+              });
+            }
+          });
+
+          if (lineItems.length === 0) {
+            alert('❌ Unable to re-order: No items could be processed');
+            return;
+          }
+
+          // Create order data in same format as quick order
+          const orderData = {
+            currency: currency,
+            lineItems: lineItems
+          };
+
+          // Show processing state
+          const reorderBtn = event.target;
+          const originalText = reorderBtn.innerHTML;
+          reorderBtn.innerHTML = '⏳ Processing...';
+          reorderBtn.disabled = true;
+
+          // Submit order directly
+          const formData = new FormData();
+          formData.append('orderData', JSON.stringify(orderData));
+
+          fetch(window.location.href, {
+            method: 'POST',
+            body: formData
+          }).then(response => response.text())
+          .then(html => {
+            // Replace the entire page content with the response
+            document.documentElement.innerHTML = html;
+          }).catch(error => {
+            console.error('Error creating re-order:', error);
+            alert('❌ Failed to create re-order. Please try again.');
+            reorderBtn.innerHTML = originalText;
+            reorderBtn.disabled = false;
+          });
+        };
         
         function updateSummary() {
           let totalItems = 0;
@@ -425,6 +777,7 @@ export const loader = async ({ request }) => {
                 price: product.adjustedPrice,
                 quantity: qty,
                 locationName: location.locationName,
+                locationShopifyId: location.locationShopifyId, // Include shopify location ID
                 catalogTitle: location.catalogTitle || 'Unknown Catalog'
               });
             }
