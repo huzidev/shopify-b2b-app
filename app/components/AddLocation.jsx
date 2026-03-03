@@ -1,4 +1,5 @@
 import React, { useState, useCallback } from "react";
+import { useFetcher } from "react-router";
 import {
   Modal,
   TextField,
@@ -16,76 +17,69 @@ const catalogOptions = [
   { label: "Bulk Orders Catalog", value: "bulk" },
 ];
 
-export default function AddLocationModal() {
-  const [open, setOpen] = useState(true);
+export default function AddLocationModal({ onClose, companyId }) {
   const [locationName, setLocationName] = useState("");
   const [address, setAddress] = useState("");
   const [selectedCatalog, setSelectedCatalog] = useState("");
-
-  const handleClose = useCallback(() => setOpen(false), []);
-  const handleOpen = useCallback(() => setOpen(true), []);
+  const fetcher = useFetcher();
 
   const handleSave = useCallback(() => {
-    // Handle save logic here
-    console.log({ locationName, address, selectedCatalog });
-    setOpen(false);
-  }, [locationName, address, selectedCatalog]);
+    fetcher.submit(
+      {
+        actionType: "addLocation",
+        locationName,
+        address,
+        selectedCatalog,
+      },
+      { method: "post" }
+    );
+    onClose();
+  }, [locationName, address, selectedCatalog, fetcher, onClose]);
 
   return (
-    <div>
-      {/* Trigger button to reopen modal for demo */}
-      {!open && (
-        <div style={{ padding: 24 }}>
-          <Button variant="primary" onClick={handleOpen}>
-            Add location
-          </Button>
-        </div>
-      )}
+    <Modal
+      open={true}
+      onClose={onClose}
+      title="Add location"
+      primaryAction={{
+        content: "Save location",
+        onAction: handleSave,
+        variant: "primary",
+      }}
+      secondaryActions={[
+        {
+          content: "Cancel",
+          onAction: onClose,
+        },
+      ]}
+    >
+      <Modal.Section>
+        <BlockStack gap="400">
+          <TextField
+            label="Location name"
+            value={locationName}
+            onChange={setLocationName}
+            placeholder="e.g. Downtown Store"
+            autoComplete="off"
+          />
 
-      <Modal
-        open={open}
-        onClose={handleClose}
-        title="Add location"
-        primaryAction={{
-          content: "Save location",
-          onAction: handleSave,
-          variant: "primary",
-        }}
-        secondaryActions={[
-          {
-            content: "Cancel",
-            onAction: handleClose,
-          },
-        ]}
-      >
-        <Modal.Section>
-          <BlockStack gap="400">
-            <TextField
-              label="Location name"
-              value={locationName}
-              onChange={setLocationName}
-              placeholder="e.g. Downtown Store"
-              autoComplete="off"
-            />
+          <TextField
+            label="Address"
+            value={address}
+            onChange={setAddress}
+            placeholder="e.g. 100 Main St, Denver, CO"
+            autoComplete="street-address"
+          />
 
-            <TextField
-              label="Address"
-              value={address}
-              onChange={setAddress}
-              placeholder="e.g. 100 Main St, Denver, CO"
-              autoComplete="street-address"
-            />
-
-            <Select
-              label="Assign catalogs"
-              options={catalogOptions}
-              value={selectedCatalog}
-              onChange={setSelectedCatalog}
-              placeholder="Select catalogs..."
-            />
-          </BlockStack>
-        </Modal.Section>
-      </Modal>
-    </div>
+          <Select
+            label="Assign catalogs"
+            options={catalogOptions}
+            value={selectedCatalog}
+            onChange={setSelectedCatalog}
+            placeholder="Select catalogs..."
+          />
+        </BlockStack>
+      </Modal.Section>
+    </Modal>
   );
 }

@@ -1,4 +1,5 @@
 import prisma from "../db.server";
+import { getProductsForPublication } from "./product.server";
 
 // Get company by customer ID for quick order
 export async function getCompanyByCustomer(shop, customerId) {
@@ -98,26 +99,116 @@ export async function getCompany(shop, companyId) {
         shopId: dbShop.id 
       },
       include: {
+        customers: true, // Get all associated customers
         locations: {
           include: {
-            catalogs: true
+            catalogs: {
+              include: {
+                priceList: true,
+                publications: {
+                  include: {
+                    products: true
+                  }
+                }
+              }
+            }
           }
         },
         catalogs: {
           include: {
-            priceList: true
+            priceList: true,
+            publications: {
+              include: {
+                products: true
+              }
+            }
           }
         },
-        orders: true,
+        orders: {
+          include: {
+            orderItems: {
+              include: {
+                variant: {
+                  include: {
+                    product: true
+                  }
+                }
+              }
+            }
+          },
+          orderBy: {
+            createdAt: 'desc'
+          }
+        },
         _count: {
           select: {
             orders: true,
             catalogs: true,
-            locations: true
+            locations: true,
+            customers: true
           }
         }
       }
     });
+
+    if (!company) {
+      return null;
+    }
+
+    // Fetch products with pricing for each location
+    const locationProducts = [];
+
+    for (const location of company.locations) {
+      if (location.catalogs.length === 0) {
+        locationProducts.push({
+          locationId: location.id,
+          locationName: location.name,
+          locationShopifyId: location.shopifyId,
+          catalogId: null,
+          catalogTitle: null,
+          priceList: null,
+          products: [],
+          hasNoCatalogs: true
+        });
+        continue;
+      }
+
+      for (const catalog of location.catalogs) {
+        if (!catalog.publications || catalog.publications.length === 0) {
+          locationProducts.push({
+            locationId: location.id,
+            locationName: location.name,
+            locationShopifyId: location.shopifyId,
+            catalogId: catalog.id,
+            catalogTitle: catalog.title,
+            priceList: catalog.priceList,
+            products: [],
+            hasNoProducts: true
+          });
+          continue;
+        }
+
+        let allProducts = [];
+        for (const publication of catalog.publications) {
+          const products = await getProductsForPublication(dbShop.id, publication.id, catalog.priceList);
+          allProducts = [...allProducts, ...products];
+        }
+
+        locationProducts.push({
+          locationId: location.id,
+          locationName: location.name,
+          locationShopifyId: location.shopifyId,
+          catalogId: catalog.id,
+          catalogTitle: catalog.title,
+          priceList: catalog.priceList,
+          products: allProducts,
+          hasNoProducts: allProducts.length === 0
+        });
+      }
+    }
+
+    // Add the location products to the company object
+    company.locationProducts = locationProducts;
 
     return company;
   } catch (error) {
@@ -318,9 +409,9 @@ export async function createCompany({
   return { success: true };
 }
 
-export async function deleteCompany({ admin, shop, companyId }) {
+export async function deleteCompany({ admin, shop, companyShopifyId }) {
   try {
-    // First delete from Shopify
+    // First delete from Shopify using the exact mutation format requested
     const response = await admin.graphql(
       `#graphql
         mutation companyDelete($id: ID!) {
@@ -335,7 +426,7 @@ export async function deleteCompany({ admin, shop, companyId }) {
       `,
       {
         variables: {
-          id: companyId
+          id: companyShopifyId
         }
       }
     );
@@ -355,10 +446,18 @@ export async function deleteCompany({ admin, shop, companyId }) {
       where: { shopDomain: shop }
     });
 
+    if (!dbShop) {
+      return {
+        success: false,
+        error: "Shop not found"
+      };
+    }
+
+    // Delete the company and all related records (cascade should handle this)
     await prisma.company.delete({
       where: {
         shopifyId_shopId: {
-          shopifyId: companyId,
+          shopifyId: companyShopifyId,
           shopId: dbShop.id
         }
       }

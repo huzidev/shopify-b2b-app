@@ -327,7 +327,7 @@ export default function Companies() {
                         checked={isSelected}
                         onChange={() => handleSelectRow(company.id)}
                       />
-                      <Link onClick={() => navigate(`/app/company/${company.id}`)} monochrome removeUnderline={false}>
+                      <Link onClick={() => navigate(`/app/company/${company.id}`)} monochrome>
                         <Text variant="bodyMd" tone="interactive">
                           {company.name}
                         </Text>
