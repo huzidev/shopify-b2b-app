@@ -77,15 +77,40 @@ export const action = async ({ request, params }) => {
     return result;
   }
 
-  if (actionType === "addLocation") {
+  if (actionType === "create-location") {
     const company = await getCompany(session.shop, params.id);
     if (!company) {
       return { success: false, error: "Company not found" };
     }
 
     const locationData = {
-      name: formData.get("locationName"),
-      // Add other location fields as needed
+      name: formData.get("name"),
+      phone: formData.get("phone"),
+      locale: formData.get("locale"),
+      externalId: formData.get("externalId"),
+      note: formData.get("note"),
+      billingAddress: {
+        address1: formData.get("billingAddress1"),
+        address2: formData.get("billingAddress2"),
+        city: formData.get("billingCity"),
+        zip: formData.get("billingZip"),
+        firstName: formData.get("billingFirstName"),
+        lastName: formData.get("billingLastName"),
+        phone: formData.get("billingPhone"),
+        countryCode: formData.get("billingCountryCode") || "US"
+      },
+      shippingAddress: {
+        address1: formData.get("shippingAddress1"),
+        address2: formData.get("shippingAddress2"),
+        city: formData.get("shippingCity"),
+        zip: formData.get("shippingZip"),
+        firstName: formData.get("shippingFirstName"),
+        lastName: formData.get("shippingLastName"),
+        phone: formData.get("shippingPhone"),
+        countryCode: formData.get("shippingCountryCode") || "US"
+      },
+      billingSameAsShipping: formData.get("billingSameAsShipping") === "true",
+      taxExempt: formData.get("taxExempt") === "true"
     };
 
     return await createCompanyLocation({
@@ -201,10 +226,14 @@ export default function CompanyDetail() {
   // Create order rows from company data
   const orderRows =
     company.orders?.slice(0, 10).map((order) => [
-      <Link url="#" removeUnderline={false}>
+      <Link url={`/app/order/${order.id}`} removeUnderline={false}>
         <Text tone="interactive">{order.orderNumber || order.shopifyId}</Text>
       </Link>,
-      <Text>${order.totalPrice || "0.00"}</Text>,
+      <Text>${
+        typeof order.totalPrice === 'object' && order.totalPrice?.d
+          ? order.totalPrice.d[0]
+          : parseFloat(order.totalPrice || 0).toFixed(2)
+      }</Text>,
       <Text>{order.orderItems?.length || 0} items</Text>,
       <Text>{new Date(order.createdAt).toLocaleDateString()}</Text>,
     ]) || [];
@@ -516,15 +545,27 @@ export default function CompanyDetail() {
                                       tone="subdued"
                                       textDecorationLine="line-through"
                                     >
-                                      ${product.originalPrice}
+                                      ${
+                                        typeof product.originalPrice === 'object' && product.originalPrice?.d
+                                          ? product.originalPrice.d[0]
+                                          : parseFloat(product.originalPrice || 0).toFixed(2)
+                                      }
                                     </Text>
                                     <Text fontWeight="bold" tone="success">
-                                      ${product.adjustedPrice}
+                                      ${
+                                        typeof product.adjustedPrice === 'object' && product.adjustedPrice?.d
+                                          ? product.adjustedPrice.d[0]
+                                          : parseFloat(product.adjustedPrice || 0).toFixed(2)
+                                      }
                                     </Text>
                                   </InlineStack>
                                 ) : (
                                   <Text fontWeight="bold">
-                                    ${product.adjustedPrice}
+                                    ${
+                                      typeof product.adjustedPrice === 'object' && product.adjustedPrice?.d
+                                        ? product.adjustedPrice.d[0]
+                                        : parseFloat(product.adjustedPrice || 0).toFixed(2)
+                                    }
                                   </Text>
                                 )}
                               </Box>,

@@ -275,3 +275,40 @@ export async function getCustomerOrderHistory(admin, customerId) {
     })) || []
   }));
 }
+
+// Get a single order by ID
+export async function getOrder(shop, orderId) {
+  try {
+    const dbShop = await db.shop.findUnique({
+      where: { shopDomain: shop }
+    });
+
+    if (!dbShop) {
+      return null;
+    }
+
+    const order = await db.order.findFirst({
+      where: { 
+        id: parseInt(orderId),
+        shopId: dbShop.id 
+      },
+      include: {
+        company: true,
+        orderItems: {
+          include: {
+            variant: {
+              include: {
+                product: true
+              }
+            }
+          }
+        }
+      }
+    });
+
+    return order;
+  } catch (error) {
+    console.error("Error fetching order:", error);
+    return null;
+  }
+}

@@ -328,7 +328,7 @@ export default function Companies() {
                         onChange={() => handleSelectRow(company.id)}
                       />
                       <Link onClick={() => navigate(`/app/company/${company.id}`)} monochrome>
-                        <Text variant="bodyMd" tone="interactive">
+                        <Text variant="bodyMd">
                           {company.name}
                         </Text>
                       </Link>
@@ -347,9 +347,9 @@ export default function Companies() {
                         </Badge>
                       </div>
                       <div style={{ textAlign: "right" }}>
-                        <Button variant="plain" tone="interactive" onClick={() => navigate(`/app/company/${company.id}`)}>
-                          Edit
-                        </Button>
+                        <Link onClick={() => navigate(`/app/company/${company.id}`)} monochrome>
+                          View
+                        </Link>
                       </div>
                     </div>
                   </Box>
