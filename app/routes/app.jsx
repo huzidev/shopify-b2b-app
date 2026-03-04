@@ -3,6 +3,8 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { AppProvider } from "@shopify/shopify-app-react-router/react";
 import { AppProvider as PolarisAppProvider } from "@shopify/polaris";
 import { authenticate } from "../shopify.server";
+import { SubscriptionProvider } from "../contexts/SubscriptionContext";
+import { useRouteSubscriptionCheck } from "../hooks/useRouteSubscriptionCheck";
 
 export const loader = async ({ request }) => {
   await authenticate.admin(request);
@@ -17,15 +19,31 @@ export default function App() {
   return (
     <AppProvider embedded apiKey={apiKey}>
       <PolarisAppProvider i18n={{}}>
-        <s-app-nav>
-          <s-link href="/app">Dashboard</s-link>
-          <s-link href="/app/product-sync">Sync Products</s-link>
-          <s-link href="/app/companies">Companies</s-link>
-          <s-link href="/app/catalogs">Catalogs</s-link>
-        </s-app-nav>
-        <Outlet />
+        <SubscriptionProvider>
+          <AppContent />
+        </SubscriptionProvider>
       </PolarisAppProvider>
     </AppProvider>
+  );
+}
+
+function AppContent() {
+  // Check subscription only on actual route changes
+  // `useRouteSubscriptionCheck` is a hook and must be called at the top level of the component.
+  // It internally watches the location pathname and applies debouncing.
+  useRouteSubscriptionCheck();
+
+  return (
+    <>
+      <s-app-nav>
+        <s-link href="/app">Dashboard</s-link>
+        <s-link href="/app/product-sync">Sync Products</s-link>
+        <s-link href="/app/companies">Companies</s-link>
+        <s-link href="/app/catalogs">Catalogs</s-link>
+        <s-link href="/app/subscriptions">Plans</s-link>
+      </s-app-nav>
+      <Outlet />
+    </>
   );
 }
 
