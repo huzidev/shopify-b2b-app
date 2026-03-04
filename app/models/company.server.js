@@ -537,6 +537,53 @@ export async function updateCompany({ admin, shop, companyId, name }) {
 
 export async function createCompanyLocation({ admin, shop, companyId, locationData }) {
   try {
+    console.log('SW what is locationData received:', JSON.stringify(locationData, null, 2));
+    
+    // Ensure required fields are present and non-empty for billing address
+    const billingAddress = locationData.billingAddress && (
+      locationData.billingAddress.firstName || 
+      locationData.billingAddress.lastName || 
+      locationData.billingAddress.address1
+    ) ? {
+      ...(locationData.billingAddress.firstName && { firstName: locationData.billingAddress.firstName }),
+      ...(locationData.billingAddress.lastName && { lastName: locationData.billingAddress.lastName }),
+      ...(locationData.billingAddress.address1 && { address1: locationData.billingAddress.address1 }),
+      ...(locationData.billingAddress.address2 && { address2: locationData.billingAddress.address2 }),
+      ...(locationData.billingAddress.city && { city: locationData.billingAddress.city }),
+      ...(locationData.billingAddress.zip && { zip: locationData.billingAddress.zip }),
+      ...(locationData.billingAddress.phone && { phone: locationData.billingAddress.phone }),
+      ...(locationData.billingAddress.countryCode && { countryCode: locationData.billingAddress.countryCode }),
+    } : null;
+
+    // Ensure required fields are present and non-empty for shipping address
+    const shippingAddress = locationData.shippingAddress && (
+      locationData.shippingAddress.firstName || 
+      locationData.shippingAddress.lastName || 
+      locationData.shippingAddress.address1
+    ) ? {
+      ...(locationData.shippingAddress.firstName && { firstName: locationData.shippingAddress.firstName }),
+      ...(locationData.shippingAddress.lastName && { lastName: locationData.shippingAddress.lastName }),
+      ...(locationData.shippingAddress.address1 && { address1: locationData.shippingAddress.address1 }),
+      ...(locationData.shippingAddress.address2 && { address2: locationData.shippingAddress.address2 }),
+      ...(locationData.shippingAddress.city && { city: locationData.shippingAddress.city }),
+      ...(locationData.shippingAddress.zip && { zip: locationData.shippingAddress.zip }),
+      ...(locationData.shippingAddress.phone && { phone: locationData.shippingAddress.phone }),
+      ...(locationData.shippingAddress.countryCode && { countryCode: locationData.shippingAddress.countryCode }),
+    } : null;
+
+    // Build the input object with only non-null fields
+    const input = {
+      ...(locationData.name && { name: locationData.name }),
+      ...(locationData.phone && { phone: locationData.phone }),
+      ...(locationData.locale && { locale: locationData.locale }),
+      ...(locationData.externalId && { externalId: locationData.externalId }),
+      ...(locationData.note && { note: locationData.note }),
+      ...(billingAddress && { billingAddress }),
+      ...(shippingAddress && { shippingAddress }),
+    };
+
+    console.log('SW what is final input:', JSON.stringify(input, null, 2));
+
     const response = await admin.graphql(
       `#graphql
         mutation companyLocationCreate($companyId: ID!, $input: CompanyLocationInput!) {
@@ -579,7 +626,7 @@ export async function createCompanyLocation({ admin, shop, companyId, locationDa
       {
         variables: {
           companyId: companyId,
-          input: locationData
+          input: input
         }
       }
     );
@@ -587,14 +634,25 @@ export async function createCompanyLocation({ admin, shop, companyId, locationDa
     const data = await response.json();
     const result = data.data.companyLocationCreate;
 
-    if (result.userErrors.length > 0) {
+    console.log("SW what is result", JSON.stringify(result, null, 2));
+
+    if (result.userErrors && result.userErrors.length > 0) {
       return {
         success: false,
-        error: result.userErrors[0].message
+        error: result.userErrors.map(err => err.message).join(", ")
       };
     }
 
     const location = result.companyLocation;
+
+    if (!location) {
+      return {
+        success: false,
+        error: "No location was created"
+      };
+    }
+
+    console.log("SW what is location", location);
 
     // Save location to database
     const dbShop = await prisma.shop.findUnique({
@@ -609,6 +667,8 @@ export async function createCompanyLocation({ admin, shop, companyId, locationDa
         }
       }
     });
+
+    console.log("SW what is db Company", dbCompany);
 
     if (dbCompany) {
       await prisma.companyLocation.create({

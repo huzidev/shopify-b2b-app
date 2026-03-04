@@ -47,6 +47,9 @@ export const action = async ({ request, params }) => {
   const formData = await request.formData();
   const actionType = formData.get("actionType");
 
+  console.log("SW what is formData", formData);
+  console.log("SW what is the id of company", params.id);
+
   if (actionType === "update") {
     const name = formData.get("name");
     return await updateCompany({
@@ -78,7 +81,12 @@ export const action = async ({ request, params }) => {
   }
 
   if (actionType === "create-location") {
+    console.log("SW is create location called???");
+    
     const company = await getCompany(session.shop, params.id);
+
+    console.log("SW what is company", company);
+    
     if (!company) {
       return { success: false, error: "Company not found" };
     }

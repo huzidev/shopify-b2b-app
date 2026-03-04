@@ -9,6 +9,7 @@ import {
   InlineStack,
   Checkbox,
   Text,
+  Banner,
 } from "@shopify/polaris";
 
 const countryOptions = [
@@ -47,6 +48,7 @@ export default function AddLocationModal({ onClose, companyId }) {
   const [billingSameAsShipping, setBillingSameAsShipping] = useState(true);
   const [taxExempt, setTaxExempt] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
   
   const fetcher = useFetcher();
 
@@ -56,43 +58,58 @@ export default function AddLocationModal({ onClose, companyId }) {
       setIsSubmitting(false);
       if (fetcher.data.success) {
         onClose();
+      } else {
+        // Handle error case
+        setErrorMessage(fetcher.data.error || "Failed to create location. Please try again.");
       }
     }
   }, [fetcher.state, fetcher.data, onClose]);
 
   const handleSave = useCallback(() => {
+    // Reset any previous error
+    setErrorMessage("");
     setIsSubmitting(true);
     
     const formData = {
       actionType: "create-location",
       companyId,
-      name,
-      phone,
-      locale,
-      externalId,
-      note,
-      billingAddress1,
-      billingAddress2,
-      billingCity,
-      billingZip,
-      billingFirstName,
-      billingLastName,
-      billingPhone,
-      billingCountryCode,
-      shippingAddress1: billingSameAsShipping ? billingAddress1 : shippingAddress1,
-      shippingAddress2: billingSameAsShipping ? billingAddress2 : shippingAddress2,
-      shippingCity: billingSameAsShipping ? billingCity : shippingCity,
-      shippingZip: billingSameAsShipping ? billingZip : shippingZip,
-      shippingFirstName: billingSameAsShipping ? billingFirstName : shippingFirstName,
-      shippingLastName: billingSameAsShipping ? billingLastName : shippingLastName,
-      shippingPhone: billingSameAsShipping ? billingPhone : shippingPhone,
-      shippingCountryCode: billingSameAsShipping ? billingCountryCode : shippingCountryCode,
+      name: name.trim(),
+      phone: phone.trim(),
+      locale: locale || "en",
+      externalId: externalId.trim(),
+      note: note.trim(),
+      // Ensure all billing address fields are provided
+      billingAddress1: billingAddress1.trim() || "",
+      billingAddress2: billingAddress2.trim() || "",
+      billingCity: billingCity.trim() || "",
+      billingZip: billingZip.trim() || "",
+      billingFirstName: billingFirstName.trim() || "",
+      billingLastName: billingLastName.trim() || "",
+      billingPhone: billingPhone.trim() || "",
+      billingCountryCode: billingCountryCode || "US",
+      // Shipping address
+      shippingAddress1: billingSameAsShipping ? (billingAddress1.trim() || "") : (shippingAddress1.trim() || ""),
+      shippingAddress2: billingSameAsShipping ? (billingAddress2.trim() || "") : (shippingAddress2.trim() || ""),
+      shippingCity: billingSameAsShipping ? (billingCity.trim() || "") : (shippingCity.trim() || ""),
+      shippingZip: billingSameAsShipping ? (billingZip.trim() || "") : (shippingZip.trim() || ""),
+      shippingFirstName: billingSameAsShipping ? (billingFirstName.trim() || "") : (shippingFirstName.trim() || ""),
+      shippingLastName: billingSameAsShipping ? (billingLastName.trim() || "") : (shippingLastName.trim() || ""),
+      shippingPhone: billingSameAsShipping ? (billingPhone.trim() || "") : (shippingPhone.trim() || ""),
+      shippingCountryCode: billingSameAsShipping ? (billingCountryCode || "US") : (shippingCountryCode || "US"),
       billingSameAsShipping: billingSameAsShipping.toString(),
       taxExempt: taxExempt.toString(),
     };
     
     fetcher.submit(formData, { method: "post" });
   }, [name, phone, locale, externalId, note, billingAddress1, billingAddress2, billingCity, billingZip, billingFirstName, billingLastName, billingPhone, billingCountryCode, shippingAddress1, shippingAddress2, shippingCity, shippingZip, shippingFirstName, shippingLastName, shippingPhone, shippingCountryCode, billingSameAsShipping, taxExempt, fetcher, companyId]);
+
+  // Clear error when user starts typing in name field
+  const handleNameChange = useCallback((value) => {
+    setName(value);
+    if (errorMessage) {
+      setErrorMessage("");
+    }
+  }, [errorMessage]);
 
   return (
     <Modal
@@ -116,10 +133,16 @@ export default function AddLocationModal({ onClose, companyId }) {
     >
       <Modal.Section>
         <BlockStack gap="400">
+          {errorMessage && (
+            <Banner tone="critical">
+              <Text>{errorMessage}</Text>
+            </Banner>
+          )}
+          
           <TextField
             label="Location name"
             value={name}
-            onChange={setName}
+            onChange={handleNameChange}
             placeholder="e.g. Downtown Store"
             autoComplete="off"
             requiredIndicator
@@ -153,7 +176,7 @@ export default function AddLocationModal({ onClose, companyId }) {
           {/* Billing Address Section */}
           <BlockStack gap="300">
             <Text variant="headingSm" as="h4">
-              Billing Address
+              Billing Address (Optional)
             </Text>
             
             <InlineStack gap="300">
@@ -227,7 +250,7 @@ export default function AddLocationModal({ onClose, companyId }) {
             {!billingSameAsShipping && (
               <BlockStack gap="300">
                 <Text variant="headingSm" as="h4">
-                  Shipping Address
+                  Shipping Address (Optional)
                 </Text>
                 
                 <InlineStack gap="300">
