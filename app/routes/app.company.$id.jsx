@@ -147,13 +147,15 @@ export default function CompanyDetail() {
   const [showAddLocationModal, setShowAddLocationModal] = useState(false);
   const navigate = useNavigate();
 
+  console.log("SW what is compnany data", company);
+
   // If company not found
   if (!company) {
     return (
       <Page
         title="Company Not Found"
         backAction={{
-          onAction: () => navigate("/app/manage-companies"),
+          onAction: () => navigate("/app/companies"),
         }}
       >
         <Card>
