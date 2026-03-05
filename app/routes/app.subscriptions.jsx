@@ -344,32 +344,6 @@ export async function action({ request }) {
 
         console.log("SW: ACTION METHOD Successfully cancelled Shopify subscription:", cancelResult.message);
 
-        // Handle form limits for downgrade to free plan
-        const newMaxForms = 2; // Free plan allows 2 forms
-        
-        // Check if user has more than 2 published forms and unpublish excess
-        const Contact = (await import("../models/Contact.server")).default;
-        const contact = new Contact(session.shop, admin.graphql);
-        const publishedFormsResult = await contact.getPublishedForms();
-        
-        if (publishedFormsResult.status === 200 && publishedFormsResult.forms.length > newMaxForms) {
-          const excessCount = publishedFormsResult.forms.length - newMaxForms;
-          const formsToUnpublish = publishedFormsResult.forms.slice(-excessCount);
-          
-          const db = (await import("../db.server")).default;
-          
-          await db.form.updateMany({
-            where: {
-              id: {
-                in: formsToUnpublish.map(form => form.id)
-              }
-            },
-            data: {
-              onlinePublish: false
-            }
-          });
-        }
-
         // Now that Shopify subscription is cancelled, create free plan subscription in database
         const planData = {
           planId: selectedPlan.planId,
