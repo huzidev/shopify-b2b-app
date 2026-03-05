@@ -180,23 +180,6 @@ export async function loader({ request }) {
   const discountCode = url.searchParams.get('discount');
   let discountData = null;
   
-  if (discountCode) {
-    try {
-      const Discount = (await import("../models/Discount.server")).default;
-      const discount = new Discount();
-      const result = await discount.validateDiscountCode(discountCode);
-      if (result.status === 200 && result.discount) {
-        discountData = {
-          code: result.discount.code,
-          type: result.discount.discountType,
-          value: result.discount.discountValue
-        };
-      }
-    } catch (error) {
-      console.error("Failed to validate discount code:", error);
-    }
-  }
-  
   // Get usage statistics for current month
   let ordersData = { total: 0, thisMonth: 0, today: 0 };
   let catalogsData = { total: 0 };
@@ -326,49 +309,6 @@ export async function action({ request }) {
   const intent = formData.get("intent") || formData.get("action");
   console.log('SW ACTION METHOD: intent', intent);
   
-  if (intent === "validateDiscount") {
-    console.log("SW validate discount has been called!!");
-    const discountCode = formData.get("discountCode");
-    console.log("SW what is discount code", discountCode);
-  
-    try {
-      const Discount = (await import("../models/Discount.server")).default;
-      const discount = new Discount();
-      const result = await discount.validateDiscountCode(discountCode);
-      
-      console.log("SW what is result on validate discount", result);
-
-      if (result.status === 200 && result.discount) {
-        console.log("SW Discount fetched and returned successfully");
-        
-        return {
-          success: true,
-          type: "DiscountValidation",
-          discount: {
-            code: result.discount.code,
-            type: result.discount.discountType,
-            value: result.discount.discountValue
-          }
-        };
-      } else {
-        console.log("SW error occured fetching discount errror");
-        return {
-          success: false,
-          type: "DiscountValidation",
-          message: result.message || "Invalid discount code"
-        };
-      }
-    } catch (error) {
-      console.log("SW catch block error for discount");
-      
-      console.error("Error validating discount:", error);
-      return {
-        success: false,
-        message: "Failed to validate discount code"
-      };
-    }
-  }
-
   if (intent === "subscribe") {
     const planId = formData.get("planId");
     const discountCode = formData.get("discountCode");
@@ -378,24 +318,6 @@ export async function action({ request }) {
     const selectedPlan = plans.find(plan => plan.planId === planId);
     console.log("SW ACTION what is current: selectedPlan", selectedPlan);
     
-    // Apply discount if provided
-    if (discountCode && selectedPlan.price > 0) {
-      try {
-        const Discount = (await import("../models/Discount.server")).default;
-        const discount = new Discount();
-        const result = await discount.validateDiscountCode(discountCode);
-        
-        if (result.status === 200 && result.discount) {
-          originalPrice = selectedPlan.price;
-          // All discounts are percentage-based
-          discountedPrice = originalPrice * (1 - result.discount.discountValue / 100);
-          discountedPrice = Math.round(discountedPrice * 100) / 100; // Round to 2 decimals
-        }
-      } catch (error) {
-        console.error("Error applying discount:", error);
-      }
-    }
-
     if (!selectedPlan) {
       return {
         error: "Invalid plan selected",
