@@ -976,10 +976,11 @@ export function PricingPlans() {
           </Text>
           <br />
           <Text as="ul" variant="bodyMd">
-            <li>• Limit you to 2 forms maximum</li>
-            <li>• Limit you to 100 submissions per month</li>
-            <li>• Remove email notifications</li>
-            <li>• Unpublish any excess forms beyond the 2-form limit</li>
+            <li>• Limit you to 1 catalog maximum</li>
+            <li>• Limit you to 5 companies</li>
+            <li>• Limit you to 50 orders per month</li>
+            <li>• Deactivate any excess catalogs beyond the 1-catalog limit</li>
+            <li>• Remove advanced B2B features like custom pricing and publications</li>
           </Text>
           <br />
           <Text as="p" variant="bodyMd" tone="critical">
