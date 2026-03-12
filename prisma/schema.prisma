@@ -26,7 +26,7 @@ model Session {
   refreshToken        String?
   refreshTokenExpires DateTime?
 }
-
+  
 model Shop {
   id          Int      @id @default(autoincrement())
   shopDomain  String   @unique
@@ -40,6 +40,7 @@ model Shop {
   priceLists  PriceList[]
   publications Publication[]
   companyCustomers CompanyCustomer[]
+  collections Collection[]
 
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -252,6 +253,45 @@ model OrderItem {
   @@index([orderId])
   @@index([variantId])
   @@map("order_items")
+}
+
+model Collection {
+  id          Int      @id @default(autoincrement())
+  shopId      Int
+  title       String
+  description String?
+  status      String   @default("ACTIVE") // ACTIVE, INACTIVE
+
+  shop        Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  products    CollectionProduct[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([shopId])
+  @@map("collections")
+}
+
+model CollectionProduct {
+  id              Int        @id @default(autoincrement())
+  collectionId    Int
+  productId       String     // Shopify Product ID (gid://shopify/Product/xxx)
+  variantId       String     // Shopify Variant ID (gid://shopify/ProductVariant/xxx)
+  originalPrice   Decimal    @db.Decimal(10,2)
+  discountedPrice Decimal    @db.Decimal(10,2)
+  currency        String     @default("USD")
+  sku             String?
+  productTitle    String     
+  variantTitle    String?
+
+  collection      Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+
+  createdAt       DateTime   @default(now())
+
+  @@unique([collectionId, variantId])
+  @@index([collectionId])
+  @@index([productId])
+  @@map("collection_products")
 }
 
 model Subscription {

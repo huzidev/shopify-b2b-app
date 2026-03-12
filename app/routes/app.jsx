@@ -40,6 +40,7 @@ function AppContent() {
         <s-link href="/app/product-sync">Sync Products</s-link>
         <s-link href="/app/companies">Companies</s-link>
         <s-link href="/app/catalogs">Catalogs</s-link>
+        <s-link href="/app/collections">Collections (Basic Store)</s-link>
         <s-link href="/app/subscriptions">Plans</s-link>
       </s-app-nav>
       <Outlet />
