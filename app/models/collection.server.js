@@ -1,8 +1,11 @@
 import db from "../db.server";
 
 // Create a new collection with discounted products
-export async function createCollection(shop, { title, description, products }) {
+export async function createCollection(shop, { title, description, products, discount = 0 }) {
   try {
+    console.log("Sw what is shop for find and create collection", shop);
+    
+
     const shopRecord = await db.shop.findUnique({
       where: { shopDomain: shop },
     });
@@ -30,6 +33,7 @@ export async function createCollection(shop, { title, description, products }) {
         title,
         description,
         status: "ACTIVE",
+        discount: parseFloat(discount) || 0,
       },
     });
 
@@ -350,6 +354,61 @@ export async function getCollectionProducts(shop, collectionId) {
   } catch (error) {
     console.error("Error fetching collection products:", error);
     return [];
+  }
+}
+
+// Update the collection discount percentage and recalculate all product prices
+export async function updateCollectionDiscount(shop, collectionId, discountPercentage) {
+  try {
+    const shopRecord = await db.shop.findUnique({
+      where: { shopDomain: shop },
+    });
+
+    if (!shopRecord) {
+      return { success: false, error: "Shop not found" };
+    }
+
+    // Update the discount value on the collection
+    await db.collection.updateMany({
+      where: {
+        id: parseInt(collectionId),
+        shopId: shopRecord.id,
+      },
+      data: {
+        discount: parseFloat(discountPercentage) || 0,
+        updatedAt: new Date(),
+      },
+    });
+
+    // Get all products in this collection to recalculate prices
+    const collectionProducts = await db.collectionProduct.findMany({
+      where: { collectionId: parseInt(collectionId) },
+    });
+
+    // Update each product's discounted price
+    let successCount = 0;
+    let errorCount = 0;
+    for (const product of collectionProducts) {
+      try {
+        const originalPrice = parseFloat(product.originalPrice) || 0;
+        const discountedPrice = originalPrice * (1 - discountPercentage / 100);
+        await db.collectionProduct.update({
+          where: { id: product.id },
+          data: { discountedPrice },
+        });
+        successCount++;
+      } catch (e) {
+        errorCount++;
+      }
+    }
+
+    return {
+      success: true,
+      message: `Updated ${successCount} product${successCount !== 1 ? 's' : ''} with ${discountPercentage}% discount${errorCount > 0 ? `, ${errorCount} failed` : ''}`,
+    };
+  } catch (error) {
+    console.error("Error updating collection discount:", error);
+    return { success: false, error: error.message };
   }
 }
 

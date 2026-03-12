@@ -261,6 +261,7 @@ model Collection {
   title       String
   description String?
   status      String   @default("ACTIVE") // ACTIVE, INACTIVE
+  discount    Decimal  @default(0) @db.Decimal(5,2) // Discount percentage (0-100)
 
   shop        Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
   products    CollectionProduct[]

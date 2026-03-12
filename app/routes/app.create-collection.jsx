@@ -101,11 +101,16 @@ export const action = async ({ request }) => {
         };
       }
 
+      const discount = parseFloat(formData.get("discount")) || 0;
+
+      console.log("SW what is session shop", session.shop);
+      
       // Create the collection
       const result = await createCollection(session.shop, {
         title,
         description,
-        products: selectedProducts
+        products: selectedProducts,
+        discount
       });
 
       console.log("SW what is the result for createCollection", result);
@@ -207,10 +212,11 @@ export default function AppCreateCollection() {
     formData.append("actionType", "createCollection");
     formData.append("title", title);
     formData.append("description", description);
+    formData.append("discount", discountPercentage.toString());
     formData.append("selectedProducts", JSON.stringify(selectedProducts));
 
     fetcher.submit(formData, { method: "POST" });
-  }, [title, description, selectedProducts, fetcher, shopify.toast]);
+  }, [title, description, discountPercentage, selectedProducts, fetcher, shopify.toast]);
 
   // Apply percentage discount to all products
   const applyPercentageDiscount = useCallback((percentage) => {
@@ -271,7 +277,9 @@ export default function AppCreateCollection() {
   return (
     <Page
       title="Create Collection"
-      breadcrumbs={[{ content: 'Collections', url: '/app/collections' }]}
+      backAction={{
+        onAction: () => navigate("/app/collections"),
+      }}
     >
       <Layout>
         <Layout.Section>

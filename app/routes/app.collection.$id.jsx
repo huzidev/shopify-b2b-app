@@ -7,7 +7,8 @@ import {
   updateProductPricing, 
   removeProductFromCollection, 
   addProductsToCollection,
-  updateCollectionStatus 
+  updateCollectionStatus,
+  updateCollectionDiscount 
 } from "../models/collection.server";
 import { getAllProductsFromShopify } from "../models/product.server";
 import {
@@ -23,19 +24,41 @@ import {
   Box,
   Divider,
   DataTable,
-  Select,
   Banner,
   Modal,
-  Checkbox,
   ResourceList,
   ResourceItem,
   Avatar,
   EmptyState,
   Tabs,
-  Spinner,
 } from "@shopify/polaris";
-import { SearchIcon, EditIcon, DeleteIcon, PlusIcon } from "@shopify/polaris-icons";
+import { DeleteIcon, PlusIcon } from "@shopify/polaris-icons";
 import { useAppBridge } from "@shopify/app-bridge-react";
+
+// Helper function to parse Decimal objects from Prisma
+const parseDecimal = (decimalObj) => {
+  if (typeof decimalObj === 'number') {
+    return decimalObj;
+  }
+  if (typeof decimalObj === 'string') {
+    return parseFloat(decimalObj);
+  }
+  if (decimalObj && typeof decimalObj === 'object' && decimalObj.d) {
+    // Handle Decimal.js format: {s: sign, e: exponent, d: digits}
+    const digits = decimalObj.d;
+    const exponent = decimalObj.e;
+    const sign = decimalObj.s;
+    
+    if (Array.isArray(digits) && digits.length >= 2) {
+      // Reconstruct the number from digits and exponent
+      const wholeDigits = digits[0];
+      const fractionalDigits = digits[1] || 0;
+      const value = wholeDigits + (fractionalDigits / Math.pow(10, 7)); // Assuming 7 decimal places
+      return sign * value;
+    }
+  }
+  return 0;
+};
 
 export const loader = async ({ request, params }) => {
   const { session, admin } = await authenticate.admin(request);
@@ -83,6 +106,18 @@ export const action = async ({ request, params }) => {
   const actionType = formData.get("actionType");
   
   try {
+    if (actionType === "updateCollectionDiscount") {
+      const discountPercentage = parseFloat(formData.get("discountPercentage")) || 0;
+      
+      const result = await updateCollectionDiscount(session.shop, params.id, discountPercentage);
+      
+      return { 
+        success: result.success, 
+        error: result.error || null,
+        message: result.message || null 
+      };
+    }
+    
     if (actionType === "updatePricing") {
       const variantId = formData.get("variantId");
       const discountedPrice = formData.get("discountedPrice");
@@ -138,7 +173,7 @@ export const action = async ({ request, params }) => {
       
       const result = await updateCollectionStatus(session.shop, params.id, status);
       
-      return { success: result.success, error: result.error || null };
+      return { success: result.success, error: result.error || null, action: "updateStatus" };
     }
     
     return { success: false, error: "Unknown action" };
@@ -160,17 +195,30 @@ export default function AppCollectionId() {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedProducts, setSelectedProducts] = useState([]);
   const [selectedTab, setSelectedTab] = useState(0);
+  const [collectionDiscountPercentage, setCollectionDiscountPercentage] = useState(
+    collection ? parseDecimal(collection.discount) : 0
+  );
+
+  // Confirmation modal states
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteVariantId, setDeleteVariantId] = useState(null);
+  const [showStatusConfirm, setShowStatusConfirm] = useState(false);
 
   // Handle action results
   React.useEffect(() => {
     if (fetcher.data?.success) {
-      let message = "Action completed successfully!";
+      let message = fetcher.data.message || "Action completed successfully!";
       if (fetcher.data.action === "removeProduct") {
         message = "Product removed from collection";
+        setShowDeleteConfirm(false);
+        setDeleteVariantId(null);
       } else if (fetcher.data.action === "addProducts") {
         message = "Products added to collection";
         setShowAddProductModal(false);
         setSelectedProducts([]);
+      } else if (fetcher.data.action === "updateStatus") {
+        message = "Collection status updated";
+        setShowStatusConfirm(false);
       }
       shopify.toast.show(message);
       setEditingPrices({});
@@ -197,15 +245,20 @@ export default function AppCollectionId() {
     );
   }
 
-  // Filter available products (exclude already added variants)
+  // Filter available products — exclude variants already in collection
   const existingVariantIds = new Set(collection.products.map(p => p.variantId));
-  const availableProducts = allProducts.filter(product => 
-    product.variants.some(variant => !existingVariantIds.has(variant.id)) &&
-    (product.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-     product.variants.some(variant => 
-       variant.sku.toLowerCase().includes(searchTerm.toLowerCase())
-     ))
-  );
+  const availableProducts = allProducts
+    .map(product => ({
+      ...product,
+      variants: product.variants.filter(variant => !existingVariantIds.has(variant.id))
+    }))
+    .filter(product => 
+      product.variants.length > 0 &&
+      (product.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+       product.variants.some(variant => 
+         variant.sku.toLowerCase().includes(searchTerm.toLowerCase())
+       ))
+    );
 
   // Handle price editing
   const handlePriceEdit = useCallback((variantId, price) => {
@@ -227,39 +280,58 @@ export default function AppCollectionId() {
     }
   }, [editingPrices, fetcher]);
 
-  // Handle product removal
-  const handleRemoveProduct = useCallback((variantId) => {
-    const formData = new FormData();
-    formData.append("actionType", "removeProduct");
-    formData.append("variantId", variantId);
-    
-    fetcher.submit(formData, { method: "POST" });
-  }, [fetcher]);
+  // Handle product removal with confirmation
+  const handleRemoveClick = useCallback((variantId) => {
+    setDeleteVariantId(variantId);
+    setShowDeleteConfirm(true);
+  }, []);
 
-  // Handle status change
-  const handleStatusChange = useCallback((newStatus) => {
+  const handleConfirmRemove = useCallback(() => {
+    if (deleteVariantId) {
+      const formData = new FormData();
+      formData.append("actionType", "removeProduct");
+      formData.append("variantId", deleteVariantId);
+      
+      fetcher.submit(formData, { method: "POST" });
+    }
+  }, [deleteVariantId, fetcher]);
+
+  // Handle status change with confirmation
+  const handleStatusToggle = useCallback(() => {
+    setShowStatusConfirm(true);
+  }, []);
+
+  const handleConfirmStatusChange = useCallback(() => {
+    const newStatus = collection.status === "ACTIVE" ? "INACTIVE" : "ACTIVE";
     const formData = new FormData();
     formData.append("actionType", "updateStatus");
     formData.append("status", newStatus);
     
     fetcher.submit(formData, { method: "POST" });
-  }, [fetcher]);
+  }, [collection.status, fetcher]);
 
-  // Handle product selection for adding
+  // Handle collection-wide discount change
+  const handleCollectionDiscountUpdate = useCallback(() => {
+    const formData = new FormData();
+    formData.append("actionType", "updateCollectionDiscount");
+    formData.append("discountPercentage", collectionDiscountPercentage.toString());
+    
+    fetcher.submit(formData, { method: "POST" });
+  }, [collectionDiscountPercentage, fetcher]);
+
+  // Handle product selection for adding — auto-apply collection discount
   const handleProductSelect = useCallback((product, variant) => {
     const productId = product.id;
     const variantId = variant.id;
-    
-    if (existingVariantIds.has(variantId)) {
-      shopify.toast.show("This product variant is already in the collection", { isError: true });
-      return;
-    }
 
     const isAlreadySelected = selectedProducts.some(item => item.variantId === variantId);
     if (isAlreadySelected) {
       shopify.toast.show("This product variant is already selected", { isError: true });
       return;
     }
+
+    const discount = collectionDiscountPercentage || 0;
+    const discountedPrice = variant.price * (1 - discount / 100);
 
     const newProduct = {
       productId,
@@ -268,12 +340,12 @@ export default function AppCollectionId() {
       variantTitle: variant.title,
       sku: variant.sku,
       originalPrice: variant.price,
-      discountedPrice: variant.price,
+      discountedPrice,
       currency: "USD"
     };
 
     setSelectedProducts(prev => [...prev, newProduct]);
-  }, [selectedProducts, existingVariantIds, shopify.toast]);
+  }, [selectedProducts, collectionDiscountPercentage, shopify.toast]);
 
   // Handle adding selected products
   const handleAddProducts = useCallback(() => {
@@ -293,14 +365,17 @@ export default function AppCollectionId() {
   const tableRows = collection.products.map((product) => {
     const variantId = product.variantId;
     const isEditing = editingPrices.hasOwnProperty(variantId);
-    const currentPrice = isEditing ? editingPrices[variantId] : product.discountedPrice;
-    const hasDiscount = parseFloat(product.discountedPrice) < parseFloat(product.originalPrice);
+    
+    const originalPrice = parseDecimal(product.originalPrice);
+    const discountedPrice = parseDecimal(product.discountedPrice);
+    const currentPrice = isEditing ? editingPrices[variantId] : discountedPrice;
+    const hasDiscount = discountedPrice < originalPrice;
 
     return [
       <Text key={`title-${variantId}`} fontWeight="semibold">{product.productTitle}</Text>,
       <Text key={`variant-${variantId}`}>{product.variantTitle}</Text>,
       <Text key={`sku-${variantId}`}>{product.sku}</Text>,
-      <Text key={`original-${variantId}`}>${parseFloat(product.originalPrice).toFixed(2)}</Text>,
+      <Text key={`original-${variantId}`}>${originalPrice.toFixed(2)}</Text>,
       <InlineStack key={`discounted-${variantId}`} gap="200" align="center">
         {isEditing ? (
           <>
@@ -334,15 +409,8 @@ export default function AppCollectionId() {
           </>
         ) : (
           <>
-            <Text>${parseFloat(product.discountedPrice).toFixed(2)}</Text>
+            <Text>${discountedPrice.toFixed(2)}</Text>
             {hasDiscount && <Badge tone="success">Discounted</Badge>}
-            <Button 
-              icon={EditIcon}
-              size="slim"
-              variant="tertiary"
-              onClick={() => handlePriceEdit(variantId, parseFloat(product.discountedPrice))}
-              accessibilityLabel="Edit price"
-            />
           </>
         )}
       </InlineStack>,
@@ -352,8 +420,7 @@ export default function AppCollectionId() {
           size="slim"
           variant="tertiary"
           tone="critical"
-          onClick={() => handleRemoveProduct(variantId)}
-          loading={fetcher.state === "submitting"}
+          onClick={() => handleRemoveClick(variantId)}
           accessibilityLabel="Remove from collection"
         />
       </InlineStack>
@@ -377,12 +444,14 @@ export default function AppCollectionId() {
   return (
     <Page
       title={collection.title}
-      breadcrumbs={[{ content: 'Collections', url: '/app/collections' }]}
       titleMetadata={
         <Badge tone={collection.status === 'ACTIVE' ? 'success' : 'critical'}>
           {collection.status.charAt(0).toUpperCase() + collection.status.slice(1).toLowerCase()}
         </Badge>
       }
+      backAction={{
+        onAction: () => navigate("/app/collections"),
+      }}
       primaryAction={{
         content: 'Add Products',
         icon: PlusIcon,
@@ -438,19 +507,57 @@ export default function AppCollectionId() {
                 {selectedTab === 1 && (
                   <BlockStack gap="400">
                     <Text variant="headingMd">Collection Settings</Text>
-                    
-                    <InlineStack gap="400">
-                      <Box minWidth="200px">
-                        <Select
-                          label="Status"
-                          options={[
-                            { label: 'Active', value: 'ACTIVE' },
-                            { label: 'Inactive', value: 'INACTIVE' },
-                          ]}
-                          value={collection.status}
-                          onChange={handleStatusChange}
-                        />
-                      </Box>
+
+                    <InlineStack gap="800" align="start" wrap>
+                      {/* Status Section */}
+                      <BlockStack gap="200">
+                        <Text variant="headingSm">Status</Text>
+                        <InlineStack gap="300" blockAlign="center">
+                          <Badge tone={collection.status === 'ACTIVE' ? 'success' : 'critical'}>
+                            {collection.status === 'ACTIVE' ? 'Active' : 'Inactive'}
+                          </Badge>
+                          <Button
+                            variant="primary"
+                            tone={collection.status === 'ACTIVE' ? "critical" : undefined}
+                            onClick={handleStatusToggle}
+                            loading={fetcher.state === "submitting"}
+                          >
+                            {collection.status === 'ACTIVE' ? 'Deactivate' : 'Activate'}
+                          </Button>
+                        </InlineStack>
+                      </BlockStack>
+
+                      {/* Discount Section */}
+                      <BlockStack gap="200">
+                        <Text variant="headingSm">Discount</Text>
+                        <InlineStack gap="300" blockAlign="end">
+                          <Box width="160px">
+                            <TextField
+                              label=""
+                              labelHidden
+                              type="number"
+                              value={collectionDiscountPercentage.toString()}
+                              onChange={(value) => setCollectionDiscountPercentage(parseFloat(value) || 0)}
+                              suffix="%"
+                              min="0"
+                              max="100"
+                              step="1"
+                              autoComplete="off"
+                            />
+                          </Box>
+                          <Button
+                            variant="primary"
+                            onClick={handleCollectionDiscountUpdate}
+                            loading={fetcher.state === "submitting"}
+                            disabled={collectionDiscountPercentage < 0 || collectionDiscountPercentage > 100}
+                          >
+                            Apply Discount
+                          </Button>
+                        </InlineStack>
+                        <Text variant="bodySm" tone="subdued">
+                          Current discount: {parseDecimal(collection.discount)}% — Applied to all {collection.products.length} product{collection.products.length !== 1 ? 's' : ''}
+                        </Text>
+                      </BlockStack>
                     </InlineStack>
 
                     <Divider />
@@ -470,6 +577,62 @@ export default function AppCollectionId() {
           </Card>
         </Layout.Section>
       </Layout>
+
+      {/* Delete Product Confirmation Modal */}
+      <Modal
+        open={showDeleteConfirm}
+        onClose={() => {
+          setShowDeleteConfirm(false);
+          setDeleteVariantId(null);
+        }}
+        title="Remove Product"
+        primaryAction={{
+          content: 'Remove',
+          destructive: true,
+          onAction: handleConfirmRemove,
+          loading: fetcher.state === "submitting"
+        }}
+        secondaryActions={[
+          {
+            content: 'Cancel',
+            onAction: () => {
+              setShowDeleteConfirm(false);
+              setDeleteVariantId(null);
+            }
+          },
+        ]}
+      >
+        <Modal.Section>
+          <Text>Are you sure you want to remove this product from the collection? This action cannot be undone.</Text>
+        </Modal.Section>
+      </Modal>
+
+      {/* Status Change Confirmation Modal */}
+      <Modal
+        open={showStatusConfirm}
+        onClose={() => setShowStatusConfirm(false)}
+        title={collection.status === 'ACTIVE' ? "Deactivate Collection" : "Activate Collection"}
+        primaryAction={{
+          content: collection.status === 'ACTIVE' ? 'Deactivate' : 'Activate',
+          destructive: collection.status === 'ACTIVE',
+          onAction: handleConfirmStatusChange,
+          loading: fetcher.state === "submitting"
+        }}
+        secondaryActions={[
+          {
+            content: 'Cancel',
+            onAction: () => setShowStatusConfirm(false)
+          },
+        ]}
+      >
+        <Modal.Section>
+          <Text>
+            {collection.status === 'ACTIVE'
+              ? "Are you sure you want to deactivate this collection? It will no longer be visible to customers."
+              : "Are you sure you want to activate this collection? It will become visible to customers."}
+          </Text>
+        </Modal.Section>
+      </Modal>
 
       {/* Add Products Modal */}
       <Modal
@@ -508,6 +671,14 @@ export default function AppCollectionId() {
               clearButton
               onClearButtonClick={() => setSearchTerm("")}
             />
+
+            {collectionDiscountPercentage > 0 && (
+              <Banner tone="info">
+                <Text>
+                  A {collectionDiscountPercentage}% discount will be automatically applied to added products.
+                </Text>
+              </Banner>
+            )}
 
             {selectedProducts.length > 0 && (
               <Banner>
@@ -550,10 +721,11 @@ export default function AppCollectionId() {
                         {product.variants.length > 0 && (
                           <BlockStack gap="100">
                             <Text variant="bodySm" fontWeight="semibold">Variants:</Text>
-                            {product.variants
-                              .filter(variant => !existingVariantIds.has(variant.id))
-                              .map((variant) => {
+                            {product.variants.map((variant) => {
                                 const isSelected = selectedProducts.some(p => p.variantId === variant.id);
+                                const discountedPrice = collectionDiscountPercentage > 0
+                                  ? variant.price * (1 - collectionDiscountPercentage / 100)
+                                  : variant.price;
                                 
                                 return (
                                   <InlineStack key={variant.id} align="space-between">
@@ -562,7 +734,11 @@ export default function AppCollectionId() {
                                         {variant.title} - SKU: {variant.sku}
                                       </Text>
                                       <Text variant="bodySm" color="subdued">
-                                        Price: ${variant.price.toFixed(2)} | Stock: {variant.inventoryQuantity}
+                                        Price: ${variant.price.toFixed(2)}
+                                        {collectionDiscountPercentage > 0 && (
+                                          <>{' '}→ ${discountedPrice.toFixed(2)}</>
+                                        )}
+                                        {' '}| Stock: {variant.inventoryQuantity}
                                       </Text>
                                     </BlockStack>
                                     <Button

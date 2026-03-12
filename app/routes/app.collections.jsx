@@ -23,7 +23,7 @@ import {
   DataTable,
   EmptyState,
 } from "@shopify/polaris";
-import { SearchIcon, SortIcon, ChevronDownIcon, EditIcon, DeleteIcon } from "@shopify/polaris-icons";
+import { SearchIcon, SortIcon, ChevronDownIcon, ViewIcon, DeleteIcon } from "@shopify/polaris-icons";
 import { useAppBridge } from "@shopify/app-bridge-react";
 
 export const loader = async ({ request }) => {
@@ -39,12 +39,45 @@ export const action = async ({ request }) => {
   const actionType = formData.get("actionType");
   
   try {
-    if (actionType === "updateStatus") {
-      const collectionId = formData.get("collectionId");
-      const status = formData.get("status");
+    if (actionType === "bulkDelete") {
+      const collectionIds = JSON.parse(formData.get("collectionIds") || "[]");
+      let successCount = 0;
+      let errorCount = 0;
       
-      const result = await updateCollectionStatus(session.shop, collectionId, status);
-      return { success: result.success, error: result.error || null };
+      for (const collectionId of collectionIds) {
+        const result = await deleteCollection(session.shop, collectionId);
+        if (result.success) {
+          successCount++;
+        } else {
+          errorCount++;
+        }
+      }
+      
+      return { 
+        success: true, 
+        message: `${successCount} collection(s) deleted successfully${errorCount > 0 ? `, ${errorCount} failed` : ''}` 
+      };
+    }
+    
+    if (actionType === "bulkUpdateStatus") {
+      const collectionIds = JSON.parse(formData.get("collectionIds") || "[]");
+      const status = formData.get("status");
+      let successCount = 0;
+      let errorCount = 0;
+      
+      for (const collectionId of collectionIds) {
+        const result = await updateCollectionStatus(session.shop, collectionId, status);
+        if (result.success) {
+          successCount++;
+        } else {
+          errorCount++;
+        }
+      }
+      
+      return { 
+        success: true, 
+        message: `${successCount} collection(s) updated successfully${errorCount > 0 ? `, ${errorCount} failed` : ''}` 
+      };
     }
     
     if (actionType === "deleteCollection") {
@@ -73,6 +106,7 @@ export default function AppCollections() {
   const [sortPopoverActive, setSortPopoverActive] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [deleteModal, setDeleteModal] = useState({ open: false, collectionId: null, collectionTitle: "" });
+  const [bulkActionModal, setBulkActionModal] = useState({ open: false, action: null, collections: [] });
   const perPage = 10;
   const navigate = useNavigate();
   const fetcher = useFetcher();
@@ -81,8 +115,11 @@ export default function AppCollections() {
   // Handle action results
   React.useEffect(() => {
     if (fetcher.data?.success) {
-      shopify.toast.show("Action completed successfully!");
+      const message = fetcher.data.message || "Action completed successfully!";
+      shopify.toast.show(message);
       setDeleteModal({ open: false, collectionId: null, collectionTitle: "" });
+      setBulkActionModal({ open: false, action: null, collections: [] });
+      setSelectedIds([]);
     } else if (fetcher.data?.error) {
       shopify.toast.show(fetcher.data.error, { isError: true });
     }
@@ -132,14 +169,38 @@ export default function AppCollections() {
     );
   }, []);
 
-  // Handle status change
-  const handleStatusChange = useCallback((collectionId, newStatus) => {
+  // Handle bulk actions
+  const handleBulkDelete = useCallback(() => {
+    const selectedCollections = paginatedCollections.filter(c => selectedIds.includes(c.id));
+    setBulkActionModal({
+      open: true,
+      action: 'delete',
+      collections: selectedCollections
+    });
+  }, [selectedIds, paginatedCollections]);
+
+  const handleBulkInactive = useCallback(() => {
+    const selectedCollections = paginatedCollections.filter(c => selectedIds.includes(c.id));
+    setBulkActionModal({
+      open: true,
+      action: 'inactive',
+      collections: selectedCollections
+    });
+  }, [selectedIds, paginatedCollections]);
+
+  const handleBulkActionConfirm = useCallback(() => {
     const formData = new FormData();
-    formData.append("actionType", "updateStatus");
-    formData.append("collectionId", collectionId.toString());
-    formData.append("status", newStatus);
+    formData.append("collectionIds", JSON.stringify(selectedIds));
+    
+    if (bulkActionModal.action === 'delete') {
+      formData.append("actionType", "bulkDelete");
+    } else if (bulkActionModal.action === 'inactive') {
+      formData.append("actionType", "bulkUpdateStatus");
+      formData.append("status", "INACTIVE");
+    }
+    
     fetcher.submit(formData, { method: "POST" });
-  }, [fetcher]);
+  }, [bulkActionModal.action, selectedIds, fetcher]);
 
   // Handle delete
   const handleDeleteClick = useCallback((collection) => {
@@ -185,19 +246,11 @@ export default function AppCollections() {
     </Badge>,
     <Text key={`created-${collection.id}`} color="subdued">{collection.createdAt}</Text>,
     <InlineStack key={`actions-${collection.id}`} gap="200">
-      <Select
-        options={[
-          { label: 'Active', value: 'ACTIVE' },
-          { label: 'Inactive', value: 'INACTIVE' },
-        ]}
-        value={collection.status}
-        onChange={(value) => handleStatusChange(collection.id, value)}
-      />
       <Button
-        icon={EditIcon}
+        icon={ViewIcon}
         variant="tertiary"
         onClick={() => navigate(`/app/collection/${collection.id}`)}
-        accessibilityLabel="Edit collection"
+        accessibilityLabel="View collection"
       />
       <Button
         icon={DeleteIcon}
@@ -281,23 +334,32 @@ export default function AppCollections() {
             </InlineStack>
           </InlineStack>
 
+          <Divider />
+
           {/* Selection info */}
           {selectedCount > 0 && (
-            <InlineStack align="space-between">
-              <Text>
-                {selectedCount} {selectedCount === 1 ? 'collection' : 'collections'} selected
-              </Text>
-              <Button
-                tone="critical"
-                onClick={() => {}}
-                disabled={true}
-              >
-                Bulk Actions (Coming Soon)
-              </Button>
-            </InlineStack>
+            <>
+              <InlineStack align="space-between">
+                <Text>
+                  {selectedCount} {selectedCount === 1 ? 'collection' : 'collections'} selected
+                </Text>
+                <InlineStack gap="200">
+                  <Button
+                    tone="critical"
+                    onClick={handleBulkDelete}
+                  >
+                    Delete Selected
+                  </Button>
+                  <Button
+                    onClick={handleBulkInactive}
+                  >
+                    Make Inactive
+                  </Button>
+                </InlineStack>
+              </InlineStack>
+              <Divider />
+            </>
           )}
-
-          <Divider />
 
           {/* Results info */}
           <InlineStack align="space-between">
@@ -392,6 +454,45 @@ export default function AppCollections() {
             Are you sure you want to delete the collection "{deleteModal.collectionTitle}"? 
             This action cannot be undone and will remove all products from this collection.
           </Text>
+        </Modal.Section>
+      </Modal>
+
+      {/* Bulk Action Confirmation Modal */}
+      <Modal
+        open={bulkActionModal.open}
+        onClose={() => setBulkActionModal({ open: false, action: null, collections: [] })}
+        title={bulkActionModal.action === 'delete' ? 'Delete Collections' : 'Make Collections Inactive'}
+        primaryAction={{
+          content: bulkActionModal.action === 'delete' ? 'Delete' : 'Make Inactive',
+          destructive: bulkActionModal.action === 'delete',
+          onAction: handleBulkActionConfirm,
+          loading: fetcher.state === "submitting"
+        }}
+        secondaryActions={[
+          {
+            content: 'Cancel',
+            onAction: () => setBulkActionModal({ open: false, action: null, collections: [] })
+          },
+        ]}
+      >
+        <Modal.Section>
+          <Text>
+            {bulkActionModal.action === 'delete' 
+              ? `Are you sure you want to delete ${selectedCount} collection${selectedCount !== 1 ? 's' : ''}? This action cannot be undone and will remove all products from these collections.`
+              : `Are you sure you want to make ${selectedCount} collection${selectedCount !== 1 ? 's' : ''} inactive? They will no longer be available to customers.`
+            }
+          </Text>
+          
+          {bulkActionModal.collections.length > 0 && (
+            <Box paddingBlockStart="300">
+              <Text variant="bodyMd" fontWeight="semibold">Collections to be affected:</Text>
+              <Box paddingBlockStart="100">
+                {bulkActionModal.collections.map(collection => (
+                  <Text key={collection.id} color="subdued">• {collection.title}</Text>
+                ))}
+              </Box>
+            </Box>
+          )}
         </Modal.Section>
       </Modal>
     </Page>
