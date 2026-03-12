@@ -1,6 +1,5 @@
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
-import { getCollectionProducts } from "../models/collection.server";
 
 // Handle collection display for customers
 export const loader = async ({ request }) => {
