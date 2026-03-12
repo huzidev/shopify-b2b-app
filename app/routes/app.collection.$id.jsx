@@ -225,7 +225,7 @@ export default function AppCollectionId() {
     } else if (fetcher.data?.error) {
       shopify.toast.show(fetcher.data.error, { isError: true });
     }
-  }, [fetcher.data, shopify.toast]);
+  }, [fetcher.data]);
 
   if (!collection) {
     return (
@@ -345,7 +345,7 @@ export default function AppCollectionId() {
     };
 
     setSelectedProducts(prev => [...prev, newProduct]);
-  }, [selectedProducts, collectionDiscountPercentage, shopify.toast]);
+  }, [selectedProducts, collectionDiscountPercentage]);
 
   // Handle adding selected products
   const handleAddProducts = useCallback(() => {
@@ -359,7 +359,7 @@ export default function AppCollectionId() {
     formData.append("selectedProducts", JSON.stringify(selectedProducts));
     
     fetcher.submit(formData, { method: "POST" });
-  }, [selectedProducts, fetcher, shopify.toast]);
+  }, [selectedProducts, fetcher]);
 
   // Table rows for collection products
   const tableRows = collection.products.map((product) => {

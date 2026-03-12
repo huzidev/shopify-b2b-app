@@ -123,7 +123,7 @@ export default function AppCollections() {
     } else if (fetcher.data?.error) {
       shopify.toast.show(fetcher.data.error, { isError: true });
     }
-  }, [fetcher.data, shopify.toast]);
+  }, [fetcher.data]);
 
   // Transform collections for display
   const transformedCollections = collections?.map(collection => ({

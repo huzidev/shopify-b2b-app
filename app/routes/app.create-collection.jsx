@@ -162,7 +162,7 @@ export default function AppCreateCollection() {
     } else if (fetcher.data?.error) {
       shopify.toast.show(fetcher.data.error, { isError: true });
     }
-  }, [fetcher.data, shopify.toast, navigate]);
+  }, [fetcher.data, navigate]);
 
   // Filter products based on search
   const filteredProducts = allProducts.filter(product =>
@@ -216,7 +216,7 @@ export default function AppCreateCollection() {
     formData.append("selectedProducts", JSON.stringify(selectedProducts));
 
     fetcher.submit(formData, { method: "POST" });
-  }, [title, description, discountPercentage, selectedProducts, fetcher, shopify.toast]);
+  }, [title, description, discountPercentage, selectedProducts, fetcher]);
 
   // Apply percentage discount to all products
   const applyPercentageDiscount = useCallback((percentage) => {
@@ -256,7 +256,7 @@ export default function AppCreateCollection() {
       }
       setCurrentStep(3);
     }
-  }, [currentStep, title, selectedProducts.length, shopify.toast]);
+  }, [currentStep, title, selectedProducts.length]);
 
   const handlePrevious = useCallback(() => {
     if (currentStep > 1) {
