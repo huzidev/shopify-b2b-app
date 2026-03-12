@@ -49,12 +49,17 @@ const parseDecimal = (decimalObj) => {
     const exponent = decimalObj.e;
     const sign = decimalObj.s;
     
-    if (Array.isArray(digits) && digits.length >= 2) {
-      // Reconstruct the number from digits and exponent
-      const wholeDigits = digits[0];
-      const fractionalDigits = digits[1] || 0;
-      const value = wholeDigits + (fractionalDigits / Math.pow(10, 7)); // Assuming 7 decimal places
-      return sign * value;
+    if (Array.isArray(digits) && digits.length > 0) {
+      if (digits.length === 1) {
+        // Handle single digit case (e.g., [50] for 50%)
+        return sign * digits[0];
+      } else {
+        // Handle multiple digits case
+        const wholeDigits = digits[0];
+        const fractionalDigits = digits[1] || 0;
+        const value = wholeDigits + (fractionalDigits / Math.pow(10, 7)); // Assuming 7 decimal places
+        return sign * value;
+      }
     }
   }
   return 0;
@@ -361,6 +366,8 @@ export default function AppCollectionId() {
     fetcher.submit(formData, { method: "POST" });
   }, [selectedProducts, fetcher]);
 
+  console.log("SW what is collectiond data", collection);
+
   // Table rows for collection products
   const tableRows = collection.products.map((product) => {
     const variantId = product.variantId;
@@ -487,13 +494,6 @@ export default function AppCollectionId() {
                       />
                     ) : (
                       <>
-                        <Banner tone="info">
-                          <Text>
-                            You can edit product prices directly in the table. 
-                            Changes will be reflected in your collection immediately.
-                          </Text>
-                        </Banner>
-                        
                         <DataTable
                           columnContentTypes={['text', 'text', 'text', 'numeric', 'numeric', 'text']}
                           headings={['Product', 'Variant', 'SKU', 'Original Price', 'Collection Price', 'Actions']}
