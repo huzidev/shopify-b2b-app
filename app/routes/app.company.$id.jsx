@@ -275,7 +275,6 @@ export default function CompanyDetail() {
       }}
       title={company.name}
       titleMetadata={<Badge tone="success">Active</Badge>}
-      secondaryActions={[{ content: "Edit company", onAction: () => {} }]}
       primaryAction={
         <Button
           variant="primary"
