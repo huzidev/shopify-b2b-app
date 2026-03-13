@@ -15,9 +15,10 @@ import {
   InlineStack,
   BlockStack,
   Box,
-  Divider,  
+  Divider,
 } from "@shopify/polaris";
 import { SearchIcon } from "@shopify/polaris-icons";
+import HowItWorks from "../components/HowItWorks";
 
 export const loader = async ({ request }) => {
   const { session } = await authenticate.admin(request);
@@ -125,6 +126,9 @@ export default function Dashboard() {
             />
           </Box>
         </InlineStack>
+
+        {/* How It Works */}
+        <HowItWorks />
 
         {/* Recent Activity */}
         <Card>
