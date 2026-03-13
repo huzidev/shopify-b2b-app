@@ -2,7 +2,7 @@ import React, { useState, useCallback } from "react";
 import { useFetcher, useActionData, useLoaderData, useNavigate } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
-import { getCompanies, deleteCompany, updateCompany, createCompanyLocation } from "../models/company.server";
+import { getCompanies, deleteCompany, updateCompany, createCompanyLocation, deactivateCompanies } from "../models/company.server";
 import {
   Page,
   Card,
@@ -19,6 +19,8 @@ import {
   Select,
   Popover,
   ActionList,
+  Modal,
+  TextContainer,
 } from "@shopify/polaris";
 import { SearchIcon, SortIcon, ChevronDownIcon } from "@shopify/polaris-icons";
 
@@ -96,6 +98,11 @@ export const action = async ({ request }) => {
   }
   
   return { success: false, error: "Unknown action" };
+
+  if (actionType === "deactivate") {
+    const companyIds = JSON.parse(formData.get("companyIds") || "[]");
+    return await deactivateCompanies(session.shop, companyIds);
+  }
 };
 
 const statusBadgeTone = {
@@ -112,6 +119,8 @@ export default function Companies() {
   const [currentPage, setCurrentPage] = useState(1);
   const perPage = 5;
   const navigate = useNavigate();
+  const fetcher = useFetcher();
+  const [showDeactivateModal, setShowDeactivateModal] = useState(false);
 
   // Transform database companies to match UI format
   const transformedCompanies = companies?.map(company => ({
@@ -120,7 +129,7 @@ export default function Companies() {
     email: company.contactShopifyId || `contact@${company.name.toLowerCase().replace(/\s+/g, '')}.com`, // fallback email
     locations: company.locations?.length || 0,
     catalogs: company._count?.catalogs || 0,
-    status: "Active" // Default to Active, can be enhanced based on actual status logic
+    status: company.status || "Active",
   })) || [];
 
   const filteredCompanies = transformedCompanies.filter(
@@ -155,6 +164,15 @@ export default function Companies() {
   }, []);
 
   const selectedCount = selectedIds.length;
+
+  const handleDeactivateConfirm = useCallback(() => {
+    fetcher.submit(
+      { actionType: "deactivate", companyIds: JSON.stringify(selectedIds) },
+      { method: "POST" }
+    );
+    setShowDeactivateModal(false);
+    setSelectedIds([]);
+  }, [fetcher, selectedIds]);
 
   return (
     <Page
@@ -254,8 +272,12 @@ export default function Companies() {
                     </Text>
                   </InlineStack>
                   <InlineStack gap="200">
-                    <Button>Assign catalog</Button>
-                    <Button>Deactivate</Button>
+                    <Button
+                      tone="critical"
+                      onClick={() => setShowDeactivateModal(true)}
+                    >
+                      Deactivate
+                    </Button>
                   </InlineStack>
                 </InlineStack>
               </Box>
@@ -401,6 +423,35 @@ export default function Companies() {
           </Box>
         </BlockStack>
       </Card>
+
+      {/* Deactivate Confirmation Modal */}
+      <Modal
+        open={showDeactivateModal}
+        onClose={() => setShowDeactivateModal(false)}
+        title="Deactivate companies"
+        primaryAction={{
+          content: "Deactivate",
+          destructive: true,
+          onAction: handleDeactivateConfirm,
+          loading: fetcher.state === "submitting",
+        }}
+        secondaryActions={[
+          {
+            content: "Cancel",
+            onAction: () => setShowDeactivateModal(false),
+          },
+        ]}
+      >
+        <Modal.Section>
+          <TextContainer>
+            <Text as="p">
+              Are you sure you want to deactivate {selectedIds.length}{" "}
+              {selectedIds.length === 1 ? "company" : "companies"}? Their status
+              will be set to Inactive. You can reactivate them at any time.
+            </Text>
+          </TextContainer>
+        </Modal.Section>
+      </Modal>
     </Page>
   );
 }

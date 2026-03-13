@@ -409,6 +409,31 @@ export async function createCompany({
   return { success: true };
 }
 
+export async function deactivateCompanies(shop, companyIds) {
+  try {
+    const dbShop = await prisma.shop.findUnique({
+      where: { shopDomain: shop },
+    });
+
+    if (!dbShop) {
+      return { success: false, error: "Shop not found" };
+    }
+
+    await prisma.company.updateMany({
+      where: {
+        id: { in: companyIds.map((id) => parseInt(id)) },
+        shopId: dbShop.id,
+      },
+      data: { status: "Inactive" },
+    });
+
+    return { success: true };
+  } catch (error) {
+    console.error("Error deactivating companies:", error);
+    return { success: false, error: error.message };
+  }
+}
+
 export async function deleteCompany({ admin, shop, companyShopifyId }) {
   try {
     // First delete from Shopify using the exact mutation format requested

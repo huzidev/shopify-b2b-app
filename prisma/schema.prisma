@@ -98,6 +98,7 @@ model Company {
   contactShopifyId  String?
 
   name              String
+  status            String             @default("Active") // Active, Inactive
   orders            Order[]
   catalogs          Catalog[]          
   locations         CompanyLocation[]  
