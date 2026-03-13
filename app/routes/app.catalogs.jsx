@@ -206,9 +206,9 @@ export default function Catalogs() {
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "40px 1fr 100px 150px 100px 80px",
+                gridTemplateColumns: "40px minmax(0, 2fr) 80px minmax(0, 1.5fr) 110px 70px",
                 alignItems: "center",
-                gap: "8px",
+                gap: "12px",
               }}
             >
               {selectedCount === 0 && (
@@ -222,7 +222,7 @@ export default function Catalogs() {
               <Text variant="bodySm" fontWeight="semibold" tone="subdued">
                 Catalog name
               </Text>
-              <Text variant="bodySm" fontWeight="semibold" tone="subdued" alignment="end">
+              <Text variant="bodySm" fontWeight="semibold" tone="subdued">
                 Products
               </Text>
               <Text variant="bodySm" fontWeight="semibold" tone="subdued">
@@ -231,7 +231,7 @@ export default function Catalogs() {
               <Text variant="bodySm" fontWeight="semibold" tone="subdued">
                 Status
               </Text>
-              <Text variant="bodySm" fontWeight="semibold" tone="subdued" alignment="end">
+              <Text variant="bodySm" fontWeight="semibold" tone="subdued">
                 Actions
               </Text>
             </div>
@@ -253,9 +253,9 @@ export default function Catalogs() {
                     <div
                       style={{
                         display: "grid",
-                        gridTemplateColumns: "40px 1fr 100px 150px 100px 80px",
+                        gridTemplateColumns: "40px minmax(0, 2fr) 80px minmax(0, 1.5fr) 110px 70px",
                         alignItems: "center",
-                        gap: "8px",
+                        gap: "12px",
                       }}
                     >
                       <Checkbox
@@ -265,10 +265,10 @@ export default function Catalogs() {
                       <Text variant="bodyMd" tone="interactive">
                         {catalog.name}
                       </Text>
-                      <Text variant="bodyMd" alignment="end">
+                      <Text variant="bodyMd">
                         {catalog.products}
                       </Text>
-                      <Text variant="bodyMd" tone="subdued">
+                      <Text variant="bodyMd" tone="subdued" truncate>
                         {catalog.companyName}
                       </Text>
                       <div>
@@ -276,7 +276,7 @@ export default function Catalogs() {
                           {catalog.status}
                         </Badge>
                       </div>
-                      <div style={{ textAlign: "right" }}>
+                      <div>
                         <Button variant="plain" tone="interactive" onClick={() => navigate(`/app/catalog/${catalog.id}`)}>
                           View
                         </Button>
