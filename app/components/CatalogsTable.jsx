@@ -33,7 +33,7 @@ export default function CatalogsTable({ catalogs = [] }) {
         {productsCount}
       </Text>,
       <Badge tone={statusBadgeTone[status] || "enabled"}>{status}</Badge>,
-      <Button url={`/app/catalog/${catalog.id}`} size="slim" variant="plain">
+      <Button onClick={() => navigate(`/app/catalog/${catalog.id}`)} size="slim" variant="plain">
         View
       </Button>,
     ];

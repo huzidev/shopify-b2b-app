@@ -21,7 +21,7 @@ export default function CompaniesTable({ companies = [] }) {
       {company._count?.orders || 0}
     </Text>,
     <Badge tone={statusBadgeTone.Active}>Active</Badge>,
-    <Button url={`/app/company/${company.id}`} size="slim" variant="plain">
+    <Button onClick={() => navigate(`/app/company/${company.id}`)} size="slim" variant="plain">
       View
     </Button>,
   ]);
