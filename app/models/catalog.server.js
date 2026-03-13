@@ -32,6 +32,8 @@ export async function getCatalogs(shop) {
       where: { shopDomain: shop }
     });
 
+    console.log("SW what is db Shop", dbShop);
+
     if (!dbShop) {
       return [];
     }
@@ -57,6 +59,8 @@ export async function getCatalogs(shop) {
         createdAt: 'desc'
       }
     });
+
+    console.log("SW what is catalogs from backend?", catalogs);
 
     return catalogs;
   } catch (error) {

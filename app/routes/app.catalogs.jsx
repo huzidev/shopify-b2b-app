@@ -48,6 +48,8 @@ export default function Catalogs() {
   const perPage = 5;
   const navigate = useNavigate();
 
+  console.log('SW what is catalogs', catalogs);
+
   // Transform database catalogs to match UI format
   const transformedCatalogs = catalogs?.map(catalog => ({
     id: catalog.id,
