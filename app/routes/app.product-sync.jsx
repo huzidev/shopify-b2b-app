@@ -1,7 +1,9 @@
 import { useEffect, useState, useCallback } from "react";
-import { useFetcher, useLoaderData, Link, useActionData, useNavigate } from "react-router";
+import { useFetcher, useLoaderData, useNavigate } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
+import ProductSyncStats from "../components/ProductSyncStats";
+import ProductSyncIntroCard from "../components/ProductSyncIntroCard";
 import {
   syncProductsToDatabase,
   getProductStats,
@@ -11,9 +13,7 @@ import {
 } from "../models/product.server";
 import {
   Page,
-  Layout,
   Card,
-  LegacyCard,
   Button,
   Text,
   BlockStack,
@@ -23,10 +23,11 @@ import {
   IndexTable,
   IndexFilters,
   Modal,
-  Box,
   useIndexResourceState,
   ChoiceList,
   useBreakpoints,
+  Box,
+  Divider,
 } from "@shopify/polaris";
 import { useAppBridge } from "@shopify/app-bridge-react";
 
@@ -131,25 +132,6 @@ export const action = async ({ request }) => {
     };
   }
 };
-
-// Stat Card component mimicking Polaris Card with metric layout
-function StatCard({ label, value, trend, trendType }) {
-  return (
-    <Card>
-      <BlockStack gap="100">
-        <Text variant="bodyMd" tone="subdued">
-          {label}
-        </Text>
-        <Text variant="heading2xl" as="p" fontWeight="bold">
-          {value}
-        </Text>
-        <Text variant="bodySm" as="p" tone={trendType === "success" ? "success" : trendType === "warning" ? "caution" : "subdued"}>
-          {trend}
-        </Text>
-      </BlockStack>
-    </Card>
-  );
-}
 
 export default function AppProductSync() {
   const { stats, productsWithStatus } = useLoaderData();
@@ -399,55 +381,54 @@ export default function AppProductSync() {
           },
         ]}
       >
-      <Layout>
-        <Layout.Section>
-          <BlockStack vertical spacing="loose">
-            {/* Error Banner */}
-            {fetcher.data?.error && (
-              <Banner status="critical">
-                <Text as="p">Error syncing products: {fetcher.data.error}</Text>
-              </Banner>
-            )}
+        <BlockStack gap="500">
+          {/* Error Banner */}
+          {fetcher.data?.error && (
+            <Banner status="critical">
+              <Text as="p">Error syncing products: {fetcher.data.error}</Text>
+            </Banner>
+          )}
 
-            {/* Database Stats */}
-            <Text variant="headingMd" as="h2">
-              Current Database Stats
-            </Text>
-            <InlineStack>
-              <Box width="50%">
-                <StatCard
-                  label="Products Stored"
-                  value={currentStats.productCount.toString()}
-                  trend={currentStats.productCount > 0 ? "Products in database" : "No products stored"}
-                  trendType={currentStats.productCount > 0 ? "success" : "subdued"}
-                />
-              </Box>
-              <Box width="50%">
-                <StatCard
-                  label="Variants Stored"
-                  value={currentStats.variantCount.toString()}
-                  trend={currentStats.variantCount > 0 ? "Variants in database" : "No variants stored"}
-                  trendType={currentStats.variantCount > 0 ? "success" : "subdued"}
-                />
-              </Box>
-            </InlineStack>
+          {/* Database Stats */}
+          <ProductSyncStats stats={currentStats} />
 
-            {/* Sync Action */}
+          <ProductSyncIntroCard productCount={currentStats.productCount} />
+
+          {/* Selection actions */}
+          {hasSelection && (
             <Card>
-              <BlockStack gap="300">
-                <Text variant="headingMd" fontWeight="semibold">
-                  Sync Products from Shopify
+              <InlineStack align="space-between" blockAlign="center">
+                <Text variant="bodyMd" fontWeight="semibold">
+                  {selectedResources.length} selected
                 </Text>
-                <Text tone="subdued">
-                  This will fetch all products from your Shopify store and save
-                  them to the B2B database. Existing products will be updated
-                  with the latest information.
-                </Text>
-              </BlockStack>
+                <InlineStack gap="200">
+                  <Button
+                    onClick={handleBulkSync}
+                    disabled={(selectedUnsyncedProducts || []).length === 0 || isLoading}
+                  >
+                    Sync selected ({(selectedUnsyncedProducts || []).length})
+                  </Button>
+                  <Button
+                    tone="critical"
+                    onClick={handleBulkRemove}
+                    disabled={(selectedSyncedProducts || []).length === 0 || isLoading}
+                  >
+                    Remove selected ({(selectedSyncedProducts || []).length})
+                  </Button>
+                </InlineStack>
+              </InlineStack>
             </Card>
+          )}
 
-            {/* Product Table */}
-            <LegacyCard>
+          {/* Product Table */}
+          <Card>
+            <BlockStack gap="0">
+              <Box padding="300">
+                <Text variant="headingMd" as="h2">
+                  Products
+                </Text>
+              </Box>
+              <Divider />
               <IndexFilters
                 sortOptions={sortOptions}
                 sortSelected={sortSelected}
@@ -461,6 +442,7 @@ export default function AppProductSync() {
                 onClearAll={handleFiltersClearAll}
                 tabs={[]}
               />
+              <Divider />
               <IndexTable
                 condensed={useBreakpoints().smDown}
                 resourceName={resourceName}
@@ -519,11 +501,10 @@ export default function AppProductSync() {
                   </IndexTable.Row>
                 ))}
               </IndexTable>
-            </LegacyCard>
-          </BlockStack>
-        </Layout.Section>
-      </Layout>
-    </Page>
+            </BlockStack>
+          </Card>
+        </BlockStack>
+      </Page>
 
     {/* Confirmation Modal */}
     <Modal
