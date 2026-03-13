@@ -4,6 +4,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { getDashboardStats, getRecentActivity } from "../models/dashboard.server";
 import { getCompanies } from "../models/company.server";
+import { getCatalogs } from "../models/catalog.server";
 import {
   Page,
   Card,
@@ -20,18 +21,25 @@ import {
 import { SearchIcon } from "@shopify/polaris-icons";
 import HowItWorks from "../components/HowItWorks";
 import CompaniesTable from "../components/CompaniesTable";
+import CatalogsTable from "../components/CatalogsTable";
 
 export const loader = async ({ request }) => {
   const { session } = await authenticate.admin(request);
   const shop = session.shop;
   
-  const [stats, activity, companies] = await Promise.all([
+  const [stats, activity, companies, catalogs] = await Promise.all([
     getDashboardStats(shop),
     getRecentActivity(shop),
     getCompanies(shop),
+    getCatalogs(shop),
   ]);
 
-  return { stats, activity, companies: companies.slice(0, 6) };
+  return {
+    stats,
+    activity,
+    companies: companies.slice(0, 6),
+    catalogs: catalogs.slice(0, 6),
+  };
 };
 
 // Stat Card component mimicking Polaris Card with metric layout
@@ -60,7 +68,7 @@ const statusBadgeMap = {
 };
 
 export default function Dashboard() {
-  const { stats, activity, companies } = useLoaderData();
+  const { stats, activity, companies, catalogs } = useLoaderData();
   const [searchValue, setSearchValue] = useState("");
   const [selectedFilter, setSelectedFilter] = useState("all");
 
@@ -134,6 +142,9 @@ export default function Dashboard() {
 
         {/* Companies */}
         <CompaniesTable companies={companies} />
+
+        {/* Catalogs */}
+        <CatalogsTable catalogs={catalogs} />
 
         {/* Recent Activity */}
         <Card>
