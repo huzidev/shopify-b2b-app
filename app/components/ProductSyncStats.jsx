@@ -1,5 +1,5 @@
 import React from "react";
-import { Card, Text, BlockStack, InlineStack, Box } from "@shopify/polaris";
+import { Card, Text, BlockStack } from "@shopify/polaris";
 
 function MetricCard({ label, value, trend, trendType }) {
   return (
@@ -31,23 +31,23 @@ function MetricCard({ label, value, trend, trendType }) {
 
 export default function ProductSyncStats({ stats }) {
   return (
-    <InlineStack>
-      <Box width="50%">
+    <div style={{ display: "flex", gap: "16px" }}>
+      <div style={{ flex: 1 }}>
         <MetricCard
           label="Products Stored"
           value={stats.productCount.toString()}
           trend={stats.productCount > 0 ? "Products in database" : "No products stored"}
           trendType={stats.productCount > 0 ? "success" : "subdued"}
         />
-      </Box>
-      <Box width="50%">
+      </div>
+      <div style={{ flex: 1 }}>
         <MetricCard
           label="Variants Stored"
           value={stats.variantCount.toString()}
           trend={stats.variantCount > 0 ? "Variants in database" : "No variants stored"}
           trendType={stats.variantCount > 0 ? "success" : "subdued"}
         />
-      </Box>
-    </InlineStack>
+      </div>
+    </div>
   );
 }

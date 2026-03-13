@@ -1,5 +1,14 @@
 import React from "react";
-import { Card, DataTable, Badge, Text, BlockStack, Box, Button } from "@shopify/polaris";
+import {
+  Card,
+  DataTable,
+  Badge,
+  Text,
+  BlockStack,
+  Box,
+  Button,
+} from "@shopify/polaris";
+import { useNavigate } from "react-router";
 
 const statusBadgeTone = {
   Active: "success",
@@ -11,6 +20,8 @@ const statusBadgeTone = {
 };
 
 export default function CatalogsTable({ catalogs = [] }) {
+  const navigate = useNavigate();
+
   const rows = catalogs.map((catalog) => {
     const status = catalog.status || "ACTIVE";
     const productsCount =
@@ -33,7 +44,11 @@ export default function CatalogsTable({ catalogs = [] }) {
         {productsCount}
       </Text>,
       <Badge tone={statusBadgeTone[status] || "enabled"}>{status}</Badge>,
-      <Button onClick={() => navigate(`/app/catalog/${catalog.id}`)} size="slim" variant="plain">
+      <Button
+        onClick={() => navigate(`/app/catalog/${catalog.id}`)}
+        size="slim"
+        variant="plain"
+      >
         View
       </Button>,
     ];
@@ -47,7 +62,14 @@ export default function CatalogsTable({ catalogs = [] }) {
         </Text>
 
         <DataTable
-          columnContentTypes={["text", "text", "text", "numeric", "text", "text"]}
+          columnContentTypes={[
+            "text",
+            "text",
+            "text",
+            "numeric",
+            "text",
+            "text",
+          ]}
           headings={[
             <Text variant="bodySm" fontWeight="semibold" tone="subdued">
               Catalog

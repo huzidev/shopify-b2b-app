@@ -1,5 +1,14 @@
 import React from "react";
-import { Card, DataTable, Badge, Text, BlockStack, Box, Button } from "@shopify/polaris";
+import {
+  Card,
+  DataTable,
+  Badge,
+  Text,
+  BlockStack,
+  Box,
+  Button,
+} from "@shopify/polaris";
+import { useNavigate } from "react-router";
 
 const statusBadgeTone = {
   Active: "success",
@@ -7,6 +16,8 @@ const statusBadgeTone = {
 };
 
 export default function CompaniesTable({ companies = [] }) {
+  const navigate = useNavigate();
+
   const rows = companies.map((company) => [
     <Text variant="bodyMd" fontWeight="semibold">
       {company.name}
@@ -21,7 +32,11 @@ export default function CompaniesTable({ companies = [] }) {
       {company._count?.orders || 0}
     </Text>,
     <Badge tone={statusBadgeTone.Active}>Active</Badge>,
-    <Button onClick={() => navigate(`/app/company/${company.id}`)} size="slim" variant="plain">
+    <Button
+      onClick={() => navigate(`/app/company/${company.id}`)}
+      size="slim"
+      variant="plain"
+    >
       View
     </Button>,
   ]);
@@ -34,7 +49,14 @@ export default function CompaniesTable({ companies = [] }) {
         </Text>
 
         <DataTable
-          columnContentTypes={["text", "numeric", "numeric", "numeric", "text", "text"]}
+          columnContentTypes={[
+            "text",
+            "numeric",
+            "numeric",
+            "numeric",
+            "text",
+            "text",
+          ]}
           headings={[
             <Text variant="bodySm" fontWeight="semibold" tone="subdued">
               Company
