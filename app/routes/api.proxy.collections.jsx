@@ -1,27 +1,47 @@
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
 
-// Handle collection display for customers
+// Helper function to parse Decimal objects from Prisma
+const parseDecimal = (decimalObj) => {
+  if (typeof decimalObj === 'number') {
+    return decimalObj;
+  }
+  if (typeof decimalObj === 'string') {
+    return parseFloat(decimalObj);
+  }
+  if (decimalObj && typeof decimalObj === 'object' && decimalObj.d) {
+    // Handle Decimal.js format: {s: sign, e: exponent, d: digits}
+    const digits = decimalObj.d;
+    const exponent = decimalObj.e;
+    const sign = decimalObj.s;
+    
+    if (Array.isArray(digits) && digits.length > 0) {
+      if (digits.length === 1) {
+        // Handle single digit case (e.g., [50] for 50%)
+        return sign * digits[0];
+      } else {
+        // Handle multiple digits case
+        const wholeDigits = digits[0];
+        const fractionalDigits = digits[1] || 0;
+        const value = wholeDigits + (fractionalDigits / Math.pow(10, 7)); // Assuming 7 decimal places
+        return sign * value;
+      }
+    }
+  }
+  return 0;
+};
+
+// Handle collection display for customers - shows all collections
 export const loader = async ({ request }) => {
-  console.log("SW COLLECTION PROXY HAS RUN");
+  console.log("SW COLLECTION PROXY HAS RUN FOR ALL COLLECTIONS");
 
   const { liquid, admin } = await authenticate.public.appProxy(request);
 
   const url = new URL(request.url);
   const shop = url.searchParams.get("shop");
-  const collectionId = url.searchParams.get("collection_id");
   const customerId = url.searchParams.get("logged_in_customer_id");
 
-  console.log("SW Collection Proxy - Shop:", shop, "Collection ID:", collectionId, "Customer ID:", customerId);
-
-  if (!collectionId) {
-    return liquid(`
-      <div class="collection-error">
-        <h2>Error</h2>
-        <p>No collection specified.</p>
-      </div>
-    `);
-  }
+  console.log("SW Collection Proxy - Shop:", shop, "Customer ID:", customerId);
 
   // 1️⃣ Get shop
   const shopRecord = await db.shop.findUnique({
@@ -30,311 +50,267 @@ export const loader = async ({ request }) => {
 
   if (!shopRecord) {
     return liquid(`
-      <div class="collection-error">
+      <div class="quick-order-error">
         <h2>Error</h2>
         <p>Shop not found.</p>
       </div>
     `);
   }
 
-  // 2️⃣ Get collection and its products
-  const collection = await db.collection.findFirst({
+  // 2️⃣ Get all active collections for this shop
+  const collections = await db.collection.findMany({
     where: {
-      id: parseInt(collectionId),
       shopId: shopRecord.id,
       status: "ACTIVE",
     },
     include: {
-      products: {
-        orderBy: {
-          createdAt: 'desc'
-        }
-      },
+      products: true,
+      _count: {
+        select: { products: true }
+      }
     },
+    orderBy: {
+      createdAt: 'desc'
+    }
   });
 
-  if (!collection) {
-    return liquid(`
-      <div class="collection-error">
-        <h2>Collection Not Found</h2>
-        <p>The collection you're looking for is not available.</p>
-      </div>
-    `);
-  }
+  console.log("SW Collections found:", collections.length);
 
-  console.log("SW Collection found:", collection.title, "Products:", collection.products.length);
-
-  // 3️⃣ Generate HTML for the collection
-  const currency = collection.products.length > 0 ? collection.products[0].currency : "USD";
-
-  // Generate product rows
-  const productRows = collection.products.length > 0 
-    ? collection.products.map(product => {
-        const hasDiscount = parseFloat(product.discountedPrice) < parseFloat(product.originalPrice);
+  // 3️⃣ Generate collection sections matching quick-order style
+  const collectionSections = collections.length > 0 
+    ? collections.map(collection => {
+        const discountValue = parseDecimal(collection.discount);
+        const productCount = collection._count?.products || 0;
         
+        // Generate discount text
+        let discountText = "";
+        if (discountValue > 0) {
+          discountText = `${discountValue}% OFF`;
+        }
+
+        // Generate product rows
+        const productRows = collection.products.length > 0 
+          ? collection.products.map(product => {
+              const hasDiscount = parseFloat(product.discountedPrice) < parseFloat(product.originalPrice);
+              
+              return `
+                <tr data-collection-id="${collection.id}" data-product-id="${product.id}" data-title="${product.productTitle}" data-price="${product.discountedPrice}">
+                  <td>${product.productTitle}<br><span style="color: #666; font-size: 0.9em;">${product.variantTitle}</span><br><span style="color: #999; font-size: 0.8em;">SKU: ${product.sku}</span></td>
+                  <td>
+                    ${hasDiscount 
+                      ? `<span class="original-price">$${parseFloat(product.originalPrice).toFixed(2)}</span> <span class="adjusted-price">$${parseFloat(product.discountedPrice).toFixed(2)}</span>`
+                      : `<span class="adjusted-price">$${parseFloat(product.discountedPrice).toFixed(2)}</span>`
+                    }
+                  </td>
+                  <td>In Stock</td>
+                  <td><input type="number" class="qty-input" data-collection-id="${collection.id}" data-product-index="${product.id}" min="0" value="0" /></td>
+                </tr>
+              `;
+            }).join("")
+          : `<tr><td colspan="4" style="text-align: center; color: #666;">No products available in this collection</td></tr>`;
+
         return `
-          <tr>
-            <td class="product-info">
-              <div class="product-title">${product.productTitle}</div>
-              <div class="product-variant">${product.variantTitle}</div>
-              <div class="product-sku">SKU: ${product.sku}</div>
-            </td>
-            <td class="price-info">
-              ${hasDiscount ? `
-                <div class="original-price">$${parseFloat(product.originalPrice).toFixed(2)}</div>
-                <div class="discounted-price">$${parseFloat(product.discountedPrice).toFixed(2)}</div>
-                <div class="discount-badge">Sale!</div>
-              ` : `
-                <div class="current-price">$${parseFloat(product.discountedPrice).toFixed(2)}</div>
-              `}
-            </td>
-            <td class="quantity-controls">
-              <input type="number" 
-                     min="0" 
-                     value="0" 
-                     id="qty_${product.variantId}" 
-                     class="quantity-input"
-                     data-product-id="${product.productId}"
-                     data-variant-id="${product.variantId}"
-                     data-price="${product.discountedPrice}">
-            </td>
-          </tr>
+          <div class="location-section">
+            <div class="location-header">
+              <h3>${collection.title}</h3>
+              ${discountText ? `<span class="discount-badge">${discountText}</span>` : ""}
+            </div>
+            <div style="color: #666; font-style: italic; margin-bottom: 15px;">
+              ${collection.description || 'No description'} • ${productCount} ${productCount === 1 ? 'product' : 'products'}
+            </div>
+            
+            <table class="location-table">
+              <thead>
+                <tr>
+                  <th>Product</th>
+                  <th>Price</th>
+                  <th>Availability</th>
+                  <th>Qty</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${productRows}
+              </tbody>
+            </table>
+          </div>
         `;
       }).join("")
-    : `<tr><td colspan="3" style="text-align: center; padding: 20px;">No products found</td></tr>`;
-
-  return liquid(`
-    <div class="collection-container">
-      <style>
-        .collection-container {
-          max-width: 1200px;
-          margin: 0 auto;
-          padding: 20px;
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-        }
-        
-        .collection-header {
-          text-align: center;
-          margin-bottom: 30px;
-          padding: 20px;
-          background: #f8f9fa;
-          border-radius: 8px;
-        }
-        
-        .collection-title {
-          font-size: 2em;
-          margin: 0 0 10px 0;
-          color: #333;
-        }
-        
-        .collection-description {
-          color: #666;
-          font-size: 1.1em;
-        }
-        
-        .products-table {
-          width: 100%;
-          border-collapse: collapse;
-          background: white;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-          border-radius: 8px;
-          overflow: hidden;
-        }
-        
-        .products-table th {
-          background: #2c3e50;
-          color: white;
-          padding: 15px;
-          text-align: left;
-          font-weight: 600;
-        }
-        
-        .products-table td {
-          padding: 15px;
-          border-bottom: 1px solid #eee;
-        }
-        
-        .product-info .product-title {
-          font-weight: 600;
-          margin-bottom: 5px;
-          color: #333;
-        }
-        
-        .product-info .product-variant {
-          color: #666;
-          margin-bottom: 3px;
-        }
-        
-        .product-info .product-sku {
-          color: #999;
-          font-size: 0.9em;
-        }
-        
-        .price-info {
-          text-align: center;
-        }
-        
-        .original-price {
-          text-decoration: line-through;
-          color: #999;
-          font-size: 0.9em;
-        }
-        
-        .discounted-price {
-          color: #e74c3c;
-          font-weight: 600;
-          font-size: 1.1em;
-        }
-        
-        .current-price {
-          color: #333;
-          font-weight: 600;
-          font-size: 1.1em;
-        }
-        
-        .discount-badge {
-          background: #e74c3c;
-          color: white;
-          padding: 2px 6px;
-          border-radius: 4px;
-          font-size: 0.8em;
-          margin-top: 5px;
-          display: inline-block;
-        }
-        
-        .quantity-input {
-          width: 80px;
-          padding: 8px;
-          border: 1px solid #ddd;
-          border-radius: 4px;
-          text-align: center;
-        }
-        
-        .quantity-controls {
-          text-align: center;
-        }
-        
-        .order-actions {
-          margin-top: 30px;
-          text-align: center;
-          background: #f8f9fa;
-          padding: 20px;
-          border-radius: 8px;
-        }
-        
-        .btn-order {
-          background: #27ae60;
-          color: white;
-          border: none;
-          padding: 12px 30px;
-          border-radius: 6px;
-          cursor: pointer;
-          font-size: 1.1em;
-          font-weight: 600;
-          transition: background-color 0.3s;
-        }
-        
-        .btn-order:hover {
-          background: #219a52;
-        }
-        
-        .btn-order:disabled {
-          background: #bdc3c7;
-          cursor: not-allowed;
-        }
-        
-        .empty-collection {
-          text-align: center;
-          padding: 40px;
-          color: #666;
-        }
-        
-        @media (max-width: 768px) {
-          .collection-container {
-            padding: 10px;
-          }
-          
-          .products-table {
-            font-size: 0.9em;
-          }
-          
-          .products-table th,
-          .products-table td {
-            padding: 10px 5px;
-          }
-          
-          .quantity-input {
-            width: 60px;
-          }
-        }
-      </style>
-
-      <div class="collection-header">
-        <h1 class="collection-title">${collection.title}</h1>
-        ${collection.description ? `<p class="collection-description">${collection.description}</p>` : ''}
-      </div>
-
-      ${collection.products.length > 0 ? `
-        <table class="products-table">
+    : `
+      <div class="location-section">
+        <div class="location-header">
+          <h3>No Collections Available</h3>
+        </div>
+        <table class="location-table">
           <thead>
             <tr>
-              <th>Product</th>
-              <th>Price</th>
-              <th>Quantity</th>
+              <th colspan="4" style="text-align: center; color: #666;">No product collections found</th>
             </tr>
           </thead>
-          <tbody>
-            ${productRows}
-          </tbody>
         </table>
+      </div>
+    `;
 
-        <div class="order-actions">
-          <button type="button" class="btn-order" onclick="addToCart()">
-            Add Selected Items to Cart
-          </button>
-        </div>
-      ` : `
-        <div class="empty-collection">
-          <h3>No Products Available</h3>
-          <p>This collection is currently empty or products are out of stock.</p>
-        </div>
-      `}
+  // Get currency from first collection's first product if available
+  const currency = collections.length > 0 && collections[0].products.length > 0 
+    ? collections[0].products[0].currency 
+    : "USD";
 
-      <script>
-        function addToCart() {
-          const quantities = [];
-          const quantityInputs = document.querySelectorAll('.quantity-input');
+  // Serialize collection data for JavaScript
+  const collectionsDataJson = JSON.stringify(collections.map(collection => ({
+    id: collection.id,
+    title: collection.title,
+    discount: parseDecimal(collection.discount),
+    products: collection.products.map(p => ({
+      id: p.id,
+      productTitle: p.productTitle,
+      variantTitle: p.variantTitle,
+      productId: p.productId,
+      variantId: p.variantId,
+      originalPrice: parseFloat(p.originalPrice),
+      discountedPrice: parseFloat(p.discountedPrice),
+      currency: p.currency,
+      sku: p.sku
+    }))
+  })));
+
+  return liquid(`
+    <style>
+      .quick-order-container { font-family: inherit; max-width: 1200px; margin: 0 auto; }
+      .location-section { margin: 30px 0; padding: 20px; border: 1px solid #ddd; border-radius: 8px; }
+      .location-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; flex-wrap: wrap; }
+      .location-header h3 { margin: 0; color: #333; }
+      .location-table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+      .quick-order-container th, .quick-order-container td { border: 1px solid #ddd; padding: 12px 8px; text-align: left; }
+      .quick-order-container th { background: #f4f4f4; font-weight: 600; }
+      .quick-order-container input[type="number"] { width: 70px; padding: 8px; border: 1px solid #ccc; border-radius: 4px; text-align: center; }
+      .quick-order-error { padding: 20px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 4px; margin: 20px 0; }
+      .quick-order-success { padding: 20px; background: #d4edda; border: 1px solid #28a745; border-radius: 4px; margin: 20px 0; }
+      .quick-order-success a, .quick-order-error a { color: #007bff; text-decoration: underline; }
+      .original-price { text-decoration: line-through; color: #999; margin-right: 8px; font-size: 0.9em; }
+      .adjusted-price { color: #28a745; font-weight: 600; }
+      .discount-badge { display: inline-block; background: #28a745; color: white; padding: 4px 8px; border-radius: 4px; font-size: 0.85em; margin-left: 10px; }
+      .order-summary { margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 8px; }
+      .order-summary h3 { margin: 0 0 10px 0; }
+      .order-total { font-size: 1.2em; font-weight: bold; color: #333; }
+      .btn-order { 
+        background: #007bff; 
+        color: white; 
+        padding: 12px 30px; 
+        border: none; 
+        border-radius: 6px; 
+        font-size: 1.1em; 
+        cursor: pointer; 
+        margin-top: 15px;
+        display: inline-block;
+      }
+      .btn-order:hover { background: #0056b3; }
+      .btn-order:disabled { background: #ccc; cursor: not-allowed; }
+      .header-info { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; margin-bottom: 20px; }
+      .header-info h1 { margin: 0; }
+    </style>
+
+    <div class="quick-order-container">
+      <div class="header-info">
+        <h1>Product Collections</h1>
+      </div>
+      <p>Browse our curated product collections and add items to your cart</p>
+      
+      <form id="collectionOrderForm" method="POST">
+        <input type="hidden" name="orderData" id="orderDataInput" />
+        
+        <div class="locations-container">
+          ${collectionSections}
+        </div>
+
+        <div class="order-summary">
+          <h3>Cart Summary</h3>
+          <p>Items: <span id="totalItems">0</span></p>
+          <p class="order-total">Total: $<span id="orderTotal">0.00</span> ${currency}</p>
+          <button type="button" class="btn-order" id="addToCartBtn" disabled onclick="addSelectedToCart()">Add to Cart</button>
+        </div>
+      </form>
+    </div>
+
+    <script>
+      (function() {
+        const collectionsData = ${collectionsDataJson};
+        const currency = "${currency}";
+        const form = document.getElementById('collectionOrderForm');
+        const totalItemsEl = document.getElementById('totalItems');
+        const orderTotalEl = document.getElementById('orderTotal');
+        const addToCartBtn = document.getElementById('addToCartBtn');
+        
+        function updateOrderSummary() {
+          const qtyInputs = document.querySelectorAll('.qty-input');
+          let totalItems = 0;
+          let totalAmount = 0;
           
-          quantityInputs.forEach(input => {
-            const quantity = parseInt(input.value) || 0;
-            if (quantity > 0) {
-              quantities.push({
-                variantId: input.dataset.variantId,
-                productId: input.dataset.productId,
-                quantity: quantity,
-                price: parseFloat(input.dataset.price)
+          qtyInputs.forEach(input => {
+            const qty = parseInt(input.value) || 0;
+            if (qty > 0) {
+              totalItems += qty;
+              
+              // Find the corresponding product price
+              const productRow = input.closest('tr');
+              const price = parseFloat(productRow.dataset.price) || 0;
+              totalAmount += qty * price;
+            }
+          });
+          
+          totalItemsEl.textContent = totalItems;
+          orderTotalEl.textContent = totalAmount.toFixed(2);
+          addToCartBtn.disabled = totalItems === 0;
+        }
+        
+        // Add event listeners to all quantity inputs
+        document.addEventListener('input', function(e) {
+          if (e.target.classList.contains('qty-input')) {
+            updateOrderSummary();
+          }
+        });
+        
+        window.addSelectedToCart = function() {
+          const selectedItems = [];
+          const qtyInputs = document.querySelectorAll('.qty-input');
+          
+          qtyInputs.forEach(input => {
+            const qty = parseInt(input.value) || 0;
+            if (qty > 0) {
+              const productRow = input.closest('tr');
+              
+              selectedItems.push({
+                collectionId: input.dataset.collectionId,
+                productIndex: input.dataset.productIndex,
+                productTitle: productRow.dataset.title,
+                price: parseFloat(productRow.dataset.price),
+                quantity: qty
               });
             }
           });
-
-          if (quantities.length === 0) {
+          
+          if (selectedItems.length === 0) {
             alert('Please select at least one item with quantity > 0');
             return;
           }
-
+          
+          // Calculate totals
+          const totalItems = selectedItems.reduce((sum, item) => sum + item.quantity, 0);
+          const totalAmount = selectedItems.reduce((sum, item) => sum + (item.quantity * item.price), 0);
+          
           // Here you would integrate with Shopify's cart API
-          // For now, just show what would be added
-          console.log('Items to add to cart:', quantities);
+          console.log('Items to add to cart:', selectedItems);
           
-          let total = quantities.reduce((sum, item) => sum + (item.quantity * item.price), 0);
-          let itemCount = quantities.reduce((sum, item) => sum + item.quantity, 0);
-          
-          alert(\`Added \${itemCount} item(s) to cart. Total: $\${total.toFixed(2)}\`);
+          // Show success message
+          alert(\`Added \${totalItems} item(s) to cart!\\nTotal: $\${totalAmount.toFixed(2)} \${currency}\`);
           
           // Reset quantities
-          quantityInputs.forEach(input => input.value = "0");
-        }
-      </script>
-    </div>
+          qtyInputs.forEach(input => input.value = "0");
+          updateOrderSummary();
+        };
+        
+        // Initial update
+        updateOrderSummary();
+      })();
+    </script>
   `);
 };
