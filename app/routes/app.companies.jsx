@@ -96,13 +96,13 @@ export const action = async ({ request }) => {
       locationData
     });
   }
-  
-  return { success: false, error: "Unknown action" };
 
   if (actionType === "deactivate") {
     const companyIds = JSON.parse(formData.get("companyIds") || "[]");
     return await deactivateCompanies(session.shop, companyIds);
   }
+  
+  return { success: false, error: "Unknown action" };
 };
 
 const statusBadgeTone = {
