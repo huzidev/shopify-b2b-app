@@ -1,7 +1,7 @@
 import db from "../db.server";
 
-// Create a new collection with discounted products
-export async function createCollection(shop, { title, description, products, discount = 0 }) {
+// Create a new collection with discounted products and assigned customers
+export async function createCollection(shop, { title, description, products, discount = 0, customers = [] }) {
   try {
     console.log("Sw what is shop for find and create collection", shop);
     
@@ -56,13 +56,36 @@ export async function createCollection(shop, { title, description, products, dis
       });
     }
 
+    // Attach selected customers to the collection
+    if (customers && customers.length > 0) {
+      const collectionCustomers = customers
+        .filter((customer) => customer?.id && customer?.shopifyCustomerId)
+        .map((customer) => ({
+          shopId: shopRecord.id,
+          collectionId: collection.id,
+          customerId: customer.id,
+          shopifyCustomerId: customer.shopifyCustomerId,
+          email: customer.email || null,
+          firstName: customer.firstName || null,
+          lastName: customer.lastName || null,
+        }));
+
+      if (collectionCustomers.length > 0) {
+        await db.collectionCustomer.createMany({
+          data: collectionCustomers,
+          skipDuplicates: true,
+        });
+      }
+    }
+
     // Return the created collection with its products
     const createdCollection = await db.collection.findUnique({
       where: { id: collection.id },
       include: {
         products: true,
+        customers: true,
         _count: {
-          select: { products: true }
+          select: { products: true, customers: true }
         }
       },
     });
@@ -92,7 +115,7 @@ export async function getCollections(shop) {
       where: { shopId: shopRecord.id },
       include: {
         _count: {
-          select: { products: true }
+          select: { products: true, customers: true }
         }
       },
       orderBy: {

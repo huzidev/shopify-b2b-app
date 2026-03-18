@@ -31,17 +31,26 @@ const parseDecimal = (decimalObj) => {
   return 0;
 };
 
-// Handle collection display for customers - shows all collections
+// Handle collection display for customers - shows assigned collections only
 export const loader = async ({ request }) => {
-  console.log("SW COLLECTION PROXY HAS RUN FOR ALL COLLECTIONS");
+  console.log("SW COLLECTION PROXY HAS RUN");
 
-  const { liquid, admin } = await authenticate.public.appProxy(request);
+  const { liquid } = await authenticate.public.appProxy(request);
 
   const url = new URL(request.url);
   const shop = url.searchParams.get("shop");
   const customerId = url.searchParams.get("logged_in_customer_id");
 
   console.log("SW Collection Proxy - Shop:", shop, "Customer ID:", customerId);
+
+  if (!customerId) {
+    return liquid(`
+      <div class="quick-order-error">
+        <h2>Access Denied</h2>
+        <p>Please log in to access collections.</p>
+      </div>
+    `);
+  }
 
   // 1️⃣ Get shop
   const shopRecord = await db.shop.findUnique({
@@ -57,16 +66,24 @@ export const loader = async ({ request }) => {
     `);
   }
 
-  // 2️⃣ Get all active collections for this shop
+  const customerGid = `gid://shopify/Customer/${customerId}`;
+
+  // 2️⃣ Get active collections assigned to logged in customer
   const collections = await db.collection.findMany({
     where: {
       shopId: shopRecord.id,
       status: "ACTIVE",
+      customers: {
+        some: {
+          shopifyCustomerId: customerGid,
+        },
+      },
     },
     include: {
       products: true,
+      customers: true,
       _count: {
-        select: { products: true }
+        select: { products: true, customers: true }
       }
     },
     orderBy: {
@@ -74,7 +91,7 @@ export const loader = async ({ request }) => {
     }
   });
 
-  console.log("SW Collections found:", collections.length);
+  console.log("SW Collections found for customer:", collections.length);
 
   // 3️⃣ Generate collection sections matching quick-order style
   const collectionSections = collections.length > 0 
@@ -143,7 +160,7 @@ export const loader = async ({ request }) => {
         <table class="location-table">
           <thead>
             <tr>
-              <th colspan="4" style="text-align: center; color: #666;">No product collections found</th>
+              <th colspan="4" style="text-align: center; color: #666;">No product collections assigned for this customer</th>
             </tr>
           </thead>
         </table>

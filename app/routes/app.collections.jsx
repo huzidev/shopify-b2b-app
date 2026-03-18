@@ -271,6 +271,12 @@ export default function AppCollections() {
         content: 'Create Collection',
         onAction: () => navigate("/app/create-collection"),
       }}
+      secondaryActions={[
+        {
+          content: 'Sync Customers',
+          onAction: () => navigate("/app/customer-sync"),
+        },
+      ]}
     >
       <Card>
         <BlockStack gap="400">

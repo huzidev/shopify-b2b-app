@@ -40,7 +40,9 @@ model Shop {
   priceLists  PriceList[]
   publications Publication[]
   companyCustomers CompanyCustomer[]
+  customers   Customer[]
   collections Collection[]
+  collectionCustomers CollectionCustomer[]
 
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -266,12 +268,64 @@ model Collection {
 
   shop        Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
   products    CollectionProduct[]
+  customers   CollectionCustomer[]
 
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   @@index([shopId])
   @@map("collections")
+}
+
+model Customer {
+  id               Int      @id @default(autoincrement())
+  shopId           Int
+  shopifyCustomerId String
+  shopifyNumericId String?
+  email            String?
+  firstName        String?
+  lastName         String?
+  phone            String?
+  state            String?
+  tags             String?
+
+  shop             Shop               @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  collections      CollectionCustomer[]
+
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([shopifyCustomerId, shopId])
+  @@index([shopId])
+  @@index([shopifyNumericId])
+  @@index([email])
+  @@map("customers")
+}
+
+model CollectionCustomer {
+  id                Int        @id @default(autoincrement())
+  shopId            Int
+  shopifyCustomerId String
+  collectionId      Int
+  customerId        Int
+  email             String?
+  firstName         String?
+  lastName          String?
+
+  shop              Shop       @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  collection        Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  customer          Customer   @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([collectionId, shopifyCustomerId])
+  @@unique([collectionId, customerId])
+  @@index([shopId])
+  @@index([collectionId])
+  @@index([customerId])
+  @@index([shopifyCustomerId])
+  @@map("collection_customers")
 }
 
 model CollectionProduct {

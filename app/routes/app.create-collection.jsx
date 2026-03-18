@@ -4,6 +4,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { getAllProductsFromShopify } from "../models/product.server";
 import { createCollection, getCollectionByTitle } from "../models/collection.server";
+import { searchSyncedCustomers } from "../models/customer.server";
 import {
   Page,
   Layout,
@@ -56,15 +57,26 @@ export const loader = async ({ request }) => {
 };
 
 export const action = async ({ request }) => {
-  const { admin, session } = await authenticate.admin(request);
+  const { session } = await authenticate.admin(request);
   const formData = await request.formData();
   const actionType = formData.get("actionType");
   
   try {
+    if (actionType === "searchCustomers") {
+      const query = formData.get("query") || "";
+      const customers = await searchSyncedCustomers(session.shop, query, 20);
+
+      return {
+        success: true,
+        customers,
+      };
+    }
+
     if (actionType === "createCollection") {
       const title = formData.get("title");
       const description = formData.get("description") || "";
       const selectedProductsData = formData.get("selectedProducts");
+      const selectedCustomersData = formData.get("selectedCustomers");
       
       if (!title) {
         return {
@@ -101,20 +113,35 @@ export const action = async ({ request }) => {
         };
       }
 
-      const discount = parseFloat(formData.get("discount")) || 0;
+      let selectedCustomers = [];
+      if (selectedCustomersData) {
+        try {
+          selectedCustomers = JSON.parse(selectedCustomersData);
+        } catch (e) {
+          return {
+            success: false,
+            error: "Invalid customer data format"
+          };
+        }
+      }
 
-      console.log("SW what is session shop", session.shop);
+      if (selectedCustomers.length === 0) {
+        return {
+          success: false,
+          error: "Please select at least one customer for this collection"
+        };
+      }
+
+      const discount = parseFloat(formData.get("discount")) || 0;
       
       // Create the collection
       const result = await createCollection(session.shop, {
         title,
         description,
         products: selectedProducts,
+        customers: selectedCustomers,
         discount
       });
-
-      console.log("SW what is the result for createCollection", result);
-      
 
       if (!result.success) {
         return { 
@@ -137,32 +164,57 @@ export const action = async ({ request }) => {
 };
 
 export default function AppCreateCollection() {
-  const fetcher = useFetcher();
+  const createFetcher = useFetcher();
+  const customerSearchFetcher = useFetcher();
   const shopify = useAppBridge();
   const navigate = useNavigate();
   const { allProducts } = useLoaderData();
-  const isLoading = fetcher.state === "submitting";
+  const isLoading = createFetcher.state === "submitting";
 
   // Form states
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [selectedCustomers, setSelectedCustomers] = useState([]);
   const [selectedProducts, setSelectedProducts] = useState([]);
   const [discountPercentage, setDiscountPercentage] = useState(0);
   
   // UI states
   const [currentStep, setCurrentStep] = useState(1);
   const [searchTerm, setSearchTerm] = useState("");
+  const [customerSearchTerm, setCustomerSearchTerm] = useState("");
+  const [customerResults, setCustomerResults] = useState([]);
   const [selectedVariantIds, setSelectedVariantIds] = useState([]);
 
   // Handle action results
   useEffect(() => {
-    if (fetcher.data?.success) {
+    if (createFetcher.data?.success) {
       shopify.toast.show("Collection created successfully!");
       navigate("/app/collections");
-    } else if (fetcher.data?.error) {
-      shopify.toast.show(fetcher.data.error, { isError: true });
+    } else if (createFetcher.data?.error) {
+      shopify.toast.show(createFetcher.data.error, { isError: true });
     }
-  }, [fetcher.data, navigate]);
+  }, [createFetcher.data, navigate, shopify]);
+
+  useEffect(() => {
+    if (customerSearchFetcher.data?.success) {
+      setCustomerResults(customerSearchFetcher.data.customers || []);
+    }
+  }, [customerSearchFetcher.data]);
+
+  useEffect(() => {
+    if (currentStep !== 2) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      const formData = new FormData();
+      formData.append("actionType", "searchCustomers");
+      formData.append("query", customerSearchTerm);
+      customerSearchFetcher.submit(formData, { method: "POST" });
+    }, 350);
+
+    return () => clearTimeout(timer);
+  }, [customerSearchTerm, currentStep, customerSearchFetcher]);
 
   // Filter products based on search
   const filteredProducts = allProducts.filter(product =>
@@ -203,6 +255,11 @@ export default function AppCreateCollection() {
       return;
     }
 
+    if (selectedCustomers.length === 0) {
+      shopify.toast.show("Please select at least one customer", { isError: true });
+      return;
+    }
+
     if (selectedProducts.length === 0) {
       shopify.toast.show("Please select at least one product", { isError: true });
       return;
@@ -213,10 +270,11 @@ export default function AppCreateCollection() {
     formData.append("title", title);
     formData.append("description", description);
     formData.append("discount", discountPercentage.toString());
+    formData.append("selectedCustomers", JSON.stringify(selectedCustomers));
     formData.append("selectedProducts", JSON.stringify(selectedProducts));
 
-    fetcher.submit(formData, { method: "POST" });
-  }, [title, description, discountPercentage, selectedProducts, fetcher]);
+    createFetcher.submit(formData, { method: "POST" });
+  }, [title, description, discountPercentage, selectedCustomers, selectedProducts, createFetcher, shopify]);
 
   // Apply percentage discount to all products
   const applyPercentageDiscount = useCallback((percentage) => {
@@ -250,13 +308,19 @@ export default function AppCreateCollection() {
       }
       setCurrentStep(2);
     } else if (currentStep === 2) {
+      if (selectedCustomers.length === 0) {
+        shopify.toast.show("Please assign at least one customer", { isError: true });
+        return;
+      }
+      setCurrentStep(3);
+    } else if (currentStep === 3) {
       if (selectedProducts.length === 0) {
         shopify.toast.show("Please select at least one product", { isError: true });
         return;
       }
-      setCurrentStep(3);
+      setCurrentStep(4);
     }
-  }, [currentStep, title, selectedProducts.length]);
+  }, [currentStep, title, selectedCustomers.length, selectedProducts.length, shopify]);
 
   const handlePrevious = useCallback(() => {
     if (currentStep > 1) {
@@ -264,15 +328,45 @@ export default function AppCreateCollection() {
     }
   }, [currentStep]);
 
+  const handleSelectCustomer = useCallback((customer) => {
+    setSelectedCustomers((prev) => {
+      if (prev.some((item) => item.id === customer.id)) {
+        return prev;
+      }
+
+      return [
+        ...prev,
+        {
+          id: customer.id,
+          shopifyCustomerId: customer.shopifyCustomerId,
+          shopifyNumericId: customer.shopifyNumericId,
+          firstName: customer.firstName,
+          lastName: customer.lastName,
+          email: customer.email,
+        },
+      ];
+    });
+  }, []);
+
+  const handleRemoveCustomer = useCallback((customerId) => {
+    setSelectedCustomers((prev) => prev.filter((customer) => customer.id !== customerId));
+  }, []);
+
   // Progress calculation
-  const progress = ((currentStep - 1) / 2) * 100;
+  const progress = ((currentStep - 1) / 3) * 100;
 
   // Step titles
   const stepTitles = [
     "Collection Details",
+    "Assign Customers",
     "Select Products", 
     "Set Pricing"
   ];
+
+  const formatCustomerName = (customer) => {
+    const fullName = `${customer.firstName || ""} ${customer.lastName || ""}`.trim();
+    return fullName || "No name";
+  };
 
   return (
     <Page
@@ -288,7 +382,7 @@ export default function AppCreateCollection() {
               {/* Progress Bar */}
               <Box>
                 <Text variant="headingMd" as="h2">
-                  Step {currentStep} of 3: {stepTitles[currentStep - 1]}
+                  Step {currentStep} of 4: {stepTitles[currentStep - 1]}
                 </Text>
                 <Box paddingBlockStart="200">
                   <ProgressBar progress={progress} />
@@ -329,6 +423,68 @@ export default function AppCreateCollection() {
               )}
 
               {currentStep === 2 && (
+                <BlockStack gap="400">
+                  <BlockStack gap="100">
+                    <Text variant="headingLg" as="h3">Assign Customers</Text>
+                    <Text color="subdued">
+                      Search synced customers by email, Shopify customer ID, or name and assign them to this collection.
+                    </Text>
+                  </BlockStack>
+
+                  <TextField
+                    label="Search customers"
+                    value={customerSearchTerm}
+                    onChange={setCustomerSearchTerm}
+                    placeholder="Search by email, Shopify ID, or customer name"
+                    autoComplete="off"
+                    clearButton
+                    onClearButtonClick={() => setCustomerSearchTerm("")}
+                  />
+
+                  {customerSearchFetcher.state === "submitting" && (
+                    <Text color="subdued">Searching customers...</Text>
+                  )}
+
+                  {selectedCustomers.length > 0 && (
+                    <Banner tone="info">
+                      <Text>
+                        {selectedCustomers.length} customer{selectedCustomers.length !== 1 ? 's' : ''} assigned
+                      </Text>
+                    </Banner>
+                  )}
+
+                  {customerResults.length === 0 ? (
+                    <EmptyState
+                      heading="No customers found"
+                      description="Sync customers first or adjust your search term"
+                    />
+                  ) : (
+                    <DataTable
+                      columnContentTypes={['text', 'text', 'text', 'text']}
+                      headings={['Name', 'Email', 'Shopify ID', 'Action']}
+                      rows={customerResults.map((customer) => {
+                        const isSelected = selectedCustomers.some((item) => item.id === customer.id);
+                        return [
+                          <Text key={`name-${customer.id}`} fontWeight="semibold">{formatCustomerName(customer)}</Text>,
+                          <Text key={`email-${customer.id}`}>{customer.email || 'N/A'}</Text>,
+                          <Text key={`id-${customer.id}`}>{customer.shopifyNumericId || customer.shopifyCustomerId}</Text>,
+                          isSelected ? (
+                            <Button key={`remove-${customer.id}`} onClick={() => handleRemoveCustomer(customer.id)} tone="critical" size="slim">
+                              Remove
+                            </Button>
+                          ) : (
+                            <Button key={`add-${customer.id}`} onClick={() => handleSelectCustomer(customer)} variant="primary" size="slim">
+                              Add
+                            </Button>
+                          ),
+                        ];
+                      })}
+                    />
+                  )}
+                </BlockStack>
+              )}
+
+              {currentStep === 3 && (
                 <BlockStack gap="400">
                   <BlockStack gap="100">
                     <Text variant="headingLg" as="h3">Select Products</Text>
@@ -385,7 +541,7 @@ export default function AppCreateCollection() {
                 </BlockStack>
               )}
 
-              {currentStep === 3 && (
+              {currentStep === 4 && (
                 <BlockStack gap="400">
                   <BlockStack gap="100">
                     <Text variant="headingLg" as="h3">Set Pricing</Text>
@@ -462,13 +618,14 @@ export default function AppCreateCollection() {
                 </Button>
 
                 <InlineStack gap="200">
-                  {currentStep < 3 ? (
+                  {currentStep < 4 ? (
                     <Button
                       onClick={handleNext}
                       variant="primary"
                       disabled={
                         (currentStep === 1 && !title.trim()) ||
-                        (currentStep === 2 && selectedProducts.length === 0)
+                        (currentStep === 2 && selectedCustomers.length === 0) ||
+                        (currentStep === 3 && selectedProducts.length === 0)
                       }
                     >
                       Continue
@@ -478,7 +635,7 @@ export default function AppCreateCollection() {
                       onClick={handleSubmit}
                       variant="primary"
                       loading={isLoading}
-                      disabled={isLoading || !title || selectedProducts.length === 0}
+                      disabled={isLoading || !title || selectedCustomers.length === 0 || selectedProducts.length === 0}
                     >
                       Create Collection
                     </Button>
@@ -490,8 +647,9 @@ export default function AppCreateCollection() {
               <Box paddingBlockStart="200">
                 <Text color="subdued" alignment="center">
                   {currentStep === 1 && "Enter your collection details to get started"}
-                  {currentStep === 2 && "Select the products you want to include in this collection"}
-                  {currentStep === 3 && "Review and set pricing for your selected products"}
+                  {currentStep === 2 && "Assign customers who should be able to view this collection"}
+                  {currentStep === 3 && "Select the products you want to include in this collection"}
+                  {currentStep === 4 && "Review and set pricing for your selected products"}
                 </Text>
               </Box>
             </BlockStack>

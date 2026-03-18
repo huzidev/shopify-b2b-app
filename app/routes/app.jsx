@@ -38,6 +38,7 @@ function AppContent() {
       <s-app-nav>
         <s-link href="/app">Dashboard</s-link>
         <s-link href="/app/product-sync">Sync Products</s-link>
+        <s-link href="/app/customer-sync">Sync Customers</s-link>
         <s-link href="/app/companies">Companies</s-link>
         <s-link href="/app/catalogs">Catalogs</s-link>
         <s-link href="/app/collections">Collections (Basic Store)</s-link>
