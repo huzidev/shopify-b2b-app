@@ -203,17 +203,16 @@ export async function createCustomerInShopify(admin, shop, input) {
       `#graphql
         mutation customerCreate($input: CustomerInput!) {
           customerCreate(input: $input) {
+            userErrors {
+              field
+              message
+            }
             customer {
               id
               firstName
               lastName
               email
               phone
-            }
-            customerUserErrors {
-              field
-              message
-              code
             }
           }
         }
@@ -230,8 +229,8 @@ export async function createCustomerInShopify(admin, shop, input) {
       return { success: false, error: "Failed to create customer" };
     }
 
-    if (result.customerUserErrors?.length > 0) {
-      return { success: false, error: result.customerUserErrors[0].message };
+    if (result.userErrors?.length > 0) {
+      return { success: false, error: result.userErrors[0].message };
     }
 
     const createdCustomer = result.customer;

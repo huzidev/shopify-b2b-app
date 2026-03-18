@@ -14,7 +14,6 @@ import {
   BlockStack,
   Button,
   Card,
-  Checkbox,
   IndexTable,
   InlineStack,
   Modal,
