@@ -49,7 +49,6 @@ export const action = async ({ request }) => {
       const lastName = (formData.get("lastName") || "").toString().trim();
       const email = (formData.get("email") || "").toString().trim();
       const phone = (formData.get("phone") || "").toString().trim();
-      const acceptsMarketing = formData.get("acceptsMarketing") === "true";
 
       if (!email) {
         return { success: false, error: "Email is required" };
@@ -60,7 +59,6 @@ export const action = async ({ request }) => {
         lastName: lastName || undefined,
         email,
         phone: phone || undefined,
-        acceptsMarketing,
       });
 
       if (!createResult.success) {
@@ -121,7 +119,6 @@ export default function AppCustomerSync() {
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
-  const [acceptsMarketing, setAcceptsMarketing] = useState(true);
 
   useEffect(() => {
     if (fetcher.data?.success) {
@@ -138,7 +135,6 @@ export default function AppCustomerSync() {
         setLastName("");
         setEmail("");
         setPhone("");
-        setAcceptsMarketing(true);
       }
     } else if (fetcher.data?.error) {
       shopify.toast.show(fetcher.data.error, { isError: true });
@@ -162,7 +158,6 @@ export default function AppCustomerSync() {
         lastName,
         email,
         phone,
-        acceptsMarketing: acceptsMarketing ? "true" : "false",
       },
       { method: "POST" },
     );
@@ -281,11 +276,6 @@ export default function AppCustomerSync() {
             <TextField label="Last Name" value={lastName} onChange={setLastName} autoComplete="off" />
             <TextField label="Email" type="email" value={email} onChange={setEmail} autoComplete="off" />
             <TextField label="Phone" value={phone} onChange={setPhone} autoComplete="off" />
-            <Checkbox
-              label="Accepts marketing"
-              checked={acceptsMarketing}
-              onChange={setAcceptsMarketing}
-            />
           </BlockStack>
         </Modal.Section>
       </Modal>

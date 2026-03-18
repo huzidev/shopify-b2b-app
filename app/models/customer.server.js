@@ -197,12 +197,11 @@ export async function createCustomerInShopify(admin, shop, input) {
       lastName: input?.lastName,
       email: input?.email,
       phone: input?.phone,
-      acceptsMarketing: input?.acceptsMarketing,
     };
 
     const response = await admin.graphql(
       `#graphql
-        mutation customerCreate($input: CustomerCreateInput!) {
+        mutation customerCreate($input: CustomerInput!) {
           customerCreate(input: $input) {
             customer {
               id
@@ -210,7 +209,6 @@ export async function createCustomerInShopify(admin, shop, input) {
               lastName
               email
               phone
-              acceptsMarketing
             }
             customerUserErrors {
               field
