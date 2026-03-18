@@ -227,7 +227,7 @@ export default function AppCollections() {
     />,
     <Link 
       key={`title-${collection.id}`}
-      url={`/app/collection/${collection.id}`}
+      onClick={() => navigate(`/app/collection/${collection.id}`)}
     >
       <Text fontWeight="semibold">{collection.title}</Text>
     </Link>,

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useFetcher, useLoaderData, useNavigate } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
@@ -182,8 +182,10 @@ export default function AppCreateCollection() {
   const [currentStep, setCurrentStep] = useState(1);
   const [searchTerm, setSearchTerm] = useState("");
   const [customerSearchTerm, setCustomerSearchTerm] = useState("");
+  const [debouncedCustomerSearchTerm, setDebouncedCustomerSearchTerm] = useState("");
   const [customerResults, setCustomerResults] = useState([]);
   const [selectedVariantIds, setSelectedVariantIds] = useState([]);
+  const lastSubmittedCustomerQueryRef = useRef("");
 
   // Handle action results
   useEffect(() => {
@@ -207,14 +209,43 @@ export default function AppCreateCollection() {
     }
 
     const timer = setTimeout(() => {
-      const formData = new FormData();
-      formData.append("actionType", "searchCustomers");
-      formData.append("query", customerSearchTerm);
-      customerSearchFetcher.submit(formData, { method: "POST" });
-    }, 350);
+      setDebouncedCustomerSearchTerm(customerSearchTerm.trim());
+    }, 600);
 
     return () => clearTimeout(timer);
-  }, [customerSearchTerm, currentStep, customerSearchFetcher]);
+  }, [customerSearchTerm, currentStep]);
+
+  useEffect(() => {
+    if (currentStep !== 2) {
+      return;
+    }
+
+    if (!debouncedCustomerSearchTerm) {
+      setCustomerResults([]);
+      lastSubmittedCustomerQueryRef.current = "";
+      return;
+    }
+
+    // Avoid duplicate requests for the same debounced query.
+    if (lastSubmittedCustomerQueryRef.current === debouncedCustomerSearchTerm) {
+      return;
+    }
+
+    lastSubmittedCustomerQueryRef.current = debouncedCustomerSearchTerm;
+
+    const formData = new FormData();
+    formData.append("actionType", "searchCustomers");
+    formData.append("query", debouncedCustomerSearchTerm);
+    customerSearchFetcher.submit(formData, { method: "POST" });
+  }, [debouncedCustomerSearchTerm, currentStep]);
+
+  useEffect(() => {
+    if (currentStep !== 2) {
+      setDebouncedCustomerSearchTerm("");
+      lastSubmittedCustomerQueryRef.current = "";
+      setCustomerResults([]);
+    }
+  }, [currentStep]);
 
   // Filter products based on search
   const filteredProducts = allProducts.filter(product =>
