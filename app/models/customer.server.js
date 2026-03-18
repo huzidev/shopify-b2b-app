@@ -192,6 +192,14 @@ export async function getCustomersWithSyncStatus(admin, shop) {
 
 export async function createCustomerInShopify(admin, shop, input) {
   try {
+    const safeInput = {
+      firstName: input?.firstName,
+      lastName: input?.lastName,
+      email: input?.email,
+      phone: input?.phone,
+      acceptsMarketing: input?.acceptsMarketing,
+    };
+
     const response = await admin.graphql(
       `#graphql
         mutation customerCreate($input: CustomerCreateInput!) {
@@ -213,7 +221,7 @@ export async function createCustomerInShopify(admin, shop, input) {
         }
       `,
       {
-        variables: { input },
+        variables: { input: safeInput },
       },
     );
 

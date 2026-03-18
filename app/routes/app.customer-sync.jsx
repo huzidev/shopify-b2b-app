@@ -49,7 +49,6 @@ export const action = async ({ request }) => {
       const lastName = (formData.get("lastName") || "").toString().trim();
       const email = (formData.get("email") || "").toString().trim();
       const phone = (formData.get("phone") || "").toString().trim();
-      const password = (formData.get("password") || "").toString().trim();
       const acceptsMarketing = formData.get("acceptsMarketing") === "true";
 
       if (!email) {
@@ -61,7 +60,6 @@ export const action = async ({ request }) => {
         lastName: lastName || undefined,
         email,
         phone: phone || undefined,
-        password: password || undefined,
         acceptsMarketing,
       });
 
@@ -123,7 +121,6 @@ export default function AppCustomerSync() {
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
-  const [password, setPassword] = useState("");
   const [acceptsMarketing, setAcceptsMarketing] = useState(true);
 
   useEffect(() => {
@@ -141,7 +138,6 @@ export default function AppCustomerSync() {
         setLastName("");
         setEmail("");
         setPhone("");
-        setPassword("");
         setAcceptsMarketing(true);
       }
     } else if (fetcher.data?.error) {
@@ -166,7 +162,6 @@ export default function AppCustomerSync() {
         lastName,
         email,
         phone,
-        password,
         acceptsMarketing: acceptsMarketing ? "true" : "false",
       },
       { method: "POST" },
@@ -286,13 +281,6 @@ export default function AppCustomerSync() {
             <TextField label="Last Name" value={lastName} onChange={setLastName} autoComplete="off" />
             <TextField label="Email" type="email" value={email} onChange={setEmail} autoComplete="off" />
             <TextField label="Phone" value={phone} onChange={setPhone} autoComplete="off" />
-            <TextField
-              label="Password"
-              type="password"
-              value={password}
-              onChange={setPassword}
-              autoComplete="off"
-            />
             <Checkbox
               label="Accepts marketing"
               checked={acceptsMarketing}
