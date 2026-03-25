@@ -23,6 +23,8 @@ export const loader = async ({ request }) => {
   const { session } = await authenticate.admin(request);
 
   const catalogOrders = await getOrderByCatalogs(session.shop);
+  console.log("SW what is catalogOrders?", catalogOrders);
+
   const orders = [...catalogOrders].sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
   );
@@ -40,6 +42,8 @@ export const action = async ({ request }) => {
   }
 
   const collectionOrders = await getOrderByCollections(session.shop);
+  console.log("SW what is collectionOrders", collectionOrders);
+  
   const orders = [...collectionOrders].sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
   );

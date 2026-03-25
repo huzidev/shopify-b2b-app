@@ -34,35 +34,11 @@ import {
 } from "@shopify/polaris";
 import { DeleteIcon, PlusIcon } from "@shopify/polaris-icons";
 import { useAppBridge } from "@shopify/app-bridge-react";
+import Decimal from "decimal.js";
 
-// Helper function to parse Decimal objects from Prisma
-const parseDecimal = (decimalObj) => {
-  if (typeof decimalObj === 'number') {
-    return decimalObj;
-  }
-  if (typeof decimalObj === 'string') {
-    return parseFloat(decimalObj);
-  }
-  if (decimalObj && typeof decimalObj === 'object' && decimalObj.d) {
-    // Handle Decimal.js format: {s: sign, e: exponent, d: digits}
-    const digits = decimalObj.d;
-    const exponent = decimalObj.e;
-    const sign = decimalObj.s;
-    
-    if (Array.isArray(digits) && digits.length > 0) {
-      if (digits.length === 1) {
-        // Handle single digit case (e.g., [50] for 50%)
-        return sign * digits[0];
-      } else {
-        // Handle multiple digits case
-        const wholeDigits = digits[0];
-        const fractionalDigits = digits[1] || 0;
-        const value = wholeDigits + (fractionalDigits / Math.pow(10, 7)); // Assuming 7 decimal places
-        return sign * value;
-      }
-    }
-  }
-  return 0;
+const parseDecimal = (value) => {
+  if (!value) return 0;
+  return new Decimal(value).toNumber();
 };
 
 export const loader = async ({ request, params }) => {

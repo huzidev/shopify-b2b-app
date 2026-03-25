@@ -307,9 +307,6 @@ export async function getCustomerOrderHistory(admin, customerId) {
   }));
 }
 
-// Get orders that match products published through catalogs for a shop.
-// Since orders are not directly linked to catalogs, we infer membership by
-// matching order item product Shopify IDs against catalog publication products.
 export async function getOrderByCatalogs(shop) {
   try {
     const dbShop = await db.shop.findUnique({
@@ -321,33 +318,14 @@ export async function getOrderByCatalogs(shop) {
       return [];
     }
 
-    const catalogProductRows = await db.publicationProduct.findMany({
-      where: {
-        publication: {
-          shopId: dbShop.id,
-        },
-      },
-      select: {
-        productId: true,
-      },
-    });
-
-    const productIds = [...new Set(catalogProductRows.map((row) => row.productId))];
-
-    if (productIds.length === 0) {
-      return [];
-    }
-
     return await db.order.findMany({
       where: {
         shopId: dbShop.id,
-        orderItems: {
-          some: {
-            variant: {
-              product: {
-                shopifyId: {
-                  in: productIds,
-                },
+        company: {
+          is: {
+            catalogs: {
+              some: {
+                shopId: dbShop.id,
               },
             },
           },
@@ -376,9 +354,6 @@ export async function getOrderByCatalogs(shop) {
   }
 }
 
-// Get orders that match variants assigned to collections for a shop.
-// Since orders are not directly linked to collections, we infer membership by
-// matching order item variant Shopify IDs against collection products.
 export async function getOrderByCollections(shop) {
   try {
     const dbShop = await db.shop.findUnique({
@@ -390,32 +365,13 @@ export async function getOrderByCollections(shop) {
       return [];
     }
 
-    const collectionVariantRows = await db.collectionProduct.findMany({
-      where: {
-        collection: {
-          shopId: dbShop.id,
-        },
-      },
-      select: {
-        variantId: true,
-      },
-    });
-
-    const variantIds = [...new Set(collectionVariantRows.map((row) => row.variantId))];
-
-    if (variantIds.length === 0) {
-      return [];
-    }
-
     return await db.order.findMany({
       where: {
         shopId: dbShop.id,
-        orderItems: {
+        collections: {
           some: {
-            variant: {
-              shopifyId: {
-                in: variantIds,
-              },
+            collection: {
+              shopId: dbShop.id,
             },
           },
         },
