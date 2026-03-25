@@ -8,7 +8,9 @@ export async function createOrder(admin, orderData) {
     companyId, 
     companyShopifyId, 
     companyLocationId, 
-    shopId 
+    shopId,
+    collectionId,
+    collectionIds,
   } = orderData;
 
   // Calculate total amount from line items
@@ -144,6 +146,35 @@ export async function createOrder(admin, orderData) {
         }
       }
 
+      const normalizedCollectionIds = [
+        ...(Array.isArray(collectionIds) ? collectionIds : []),
+        ...(collectionId ? [collectionId] : []),
+      ]
+        .map((id) => parseInt(id, 10))
+        .filter((id) => Number.isInteger(id));
+
+      if (normalizedCollectionIds.length > 0) {
+        const uniqueCollectionIds = [...new Set(normalizedCollectionIds)];
+
+        const existingCollections = await db.collection.findMany({
+          where: {
+            id: { in: uniqueCollectionIds },
+            shopId,
+          },
+          select: { id: true },
+        });
+
+        if (existingCollections.length > 0) {
+          await db.orderCollection.createMany({
+            data: existingCollections.map((collection) => ({
+              orderId: savedOrder.id,
+              collectionId: collection.id,
+            })),
+            skipDuplicates: true,
+          });
+        }
+      }
+
     } catch (dbError) {
       console.error("Error saving order to local database:", dbError);
       // Don't fail the order creation if DB save fails
@@ -274,6 +305,142 @@ export async function getCustomerOrderHistory(admin, customerId) {
       quantity: li.node.quantity
     })) || []
   }));
+}
+
+// Get orders that match products published through catalogs for a shop.
+// Since orders are not directly linked to catalogs, we infer membership by
+// matching order item product Shopify IDs against catalog publication products.
+export async function getOrderByCatalogs(shop) {
+  try {
+    const dbShop = await db.shop.findUnique({
+      where: { shopDomain: shop },
+      select: { id: true },
+    });
+
+    if (!dbShop) {
+      return [];
+    }
+
+    const catalogProductRows = await db.publicationProduct.findMany({
+      where: {
+        publication: {
+          shopId: dbShop.id,
+        },
+      },
+      select: {
+        productId: true,
+      },
+    });
+
+    const productIds = [...new Set(catalogProductRows.map((row) => row.productId))];
+
+    if (productIds.length === 0) {
+      return [];
+    }
+
+    return await db.order.findMany({
+      where: {
+        shopId: dbShop.id,
+        orderItems: {
+          some: {
+            variant: {
+              product: {
+                shopifyId: {
+                  in: productIds,
+                },
+              },
+            },
+          },
+        },
+      },
+      include: {
+        company: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+        _count: {
+          select: {
+            orderItems: true,
+          },
+        },
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching orders by catalogs:", error);
+    return [];
+  }
+}
+
+// Get orders that match variants assigned to collections for a shop.
+// Since orders are not directly linked to collections, we infer membership by
+// matching order item variant Shopify IDs against collection products.
+export async function getOrderByCollections(shop) {
+  try {
+    const dbShop = await db.shop.findUnique({
+      where: { shopDomain: shop },
+      select: { id: true },
+    });
+
+    if (!dbShop) {
+      return [];
+    }
+
+    const collectionVariantRows = await db.collectionProduct.findMany({
+      where: {
+        collection: {
+          shopId: dbShop.id,
+        },
+      },
+      select: {
+        variantId: true,
+      },
+    });
+
+    const variantIds = [...new Set(collectionVariantRows.map((row) => row.variantId))];
+
+    if (variantIds.length === 0) {
+      return [];
+    }
+
+    return await db.order.findMany({
+      where: {
+        shopId: dbShop.id,
+        orderItems: {
+          some: {
+            variant: {
+              shopifyId: {
+                in: variantIds,
+              },
+            },
+          },
+        },
+      },
+      include: {
+        company: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+        _count: {
+          select: {
+            orderItems: true,
+          },
+        },
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching orders by collections:", error);
+    return [];
+  }
 }
 
 // Get a single order by ID

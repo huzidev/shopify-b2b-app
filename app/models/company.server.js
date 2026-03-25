@@ -55,6 +55,8 @@ export async function getCompanies(shop) {
       where: { shopDomain: shop }
     });
 
+    console.log("SW what is db Shop", dbShop);
+
     if (!dbShop) {
       return [];
     }
@@ -76,6 +78,7 @@ export async function getCompanies(shop) {
       }
     });
 
+    console.log("SW what is get companies in SSR", companies);
     return companies;
   } catch (error) {
     console.error("Error fetching companies:", error);

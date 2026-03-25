@@ -174,6 +174,9 @@ export default function Companies() {
     setSelectedIds([]);
   }, [fetcher, selectedIds]);
 
+  console.log('SW what is companies data ', companies);
+  
+
   return (
     <Page
       title="Companies"
