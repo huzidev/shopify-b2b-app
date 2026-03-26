@@ -175,7 +175,6 @@ export default function Companies() {
   }, [fetcher, selectedIds]);
 
   console.log('SW what is companies data ', companies);
-  
 
   return (
     <Page
@@ -310,7 +309,7 @@ export default function Companies() {
                 Company name
               </Text>
               <Text variant="bodySm" fontWeight="semibold" tone="subdued">
-                Email
+                Company Id
               </Text>
               <Text variant="bodySm" fontWeight="semibold" tone="subdued" alignment="end">
                 Locations
@@ -371,11 +370,13 @@ export default function Companies() {
                           {company.status}
                         </Badge>
                       </div>
-                      <div style={{ textAlign: "right" }}>
-                        <Link onClick={() => navigate(`/app/company/${company.id}`)} monochrome>
+                      <Button
+                        onClick={() => navigate(`/app/company/${company.id}`)}
+                        size="slim"
+                        variant="plain"
+                      >
                           View
-                        </Link>
-                      </div>
+                      </Button>
                     </div>
                   </Box>
                   {index < paginatedCompanies.length - 1 && <Divider />}

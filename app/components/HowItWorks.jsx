@@ -7,8 +7,10 @@ import {
   Box,
   Divider,
   Icon,
+  Button,
 } from "@shopify/polaris";
 import { StoreIcon, ProductIcon, DiscountIcon, CheckIcon } from "@shopify/polaris-icons";
+import { useNavigate } from "react-router";
 
 const HOW_IT_WORKS_STEPS = [
   {
@@ -17,6 +19,8 @@ const HOW_IT_WORKS_STEPS = [
     title: "Select Company & Location",
     description:
       "Choose a B2B company and assign one or more of its locations to scope the catalog to the right buyers.",
+    actionLabel: "Create company",
+    actionRoute: "/app/create-company",
   },
   {
     number: 2,
@@ -24,6 +28,8 @@ const HOW_IT_WORKS_STEPS = [
     title: "Add Products to Catalog",
     description:
       "Pick individual products manually or add your entire inventory in one click to build the catalog.",
+    actionLabel: "Create catalog",
+    actionRoute: "/app/create-catalog",
   },
   {
     number: 3,
@@ -31,6 +37,8 @@ const HOW_IT_WORKS_STEPS = [
     title: "Define Discounts",
     description:
       "Set pricing rules and percentage-based discounts that apply exclusively to this catalog's buyers.",
+    actionLabel: "Define discounts",
+    actionRoute: "/app/create-catalog",
   },
   {
     number: 4,
@@ -38,10 +46,14 @@ const HOW_IT_WORKS_STEPS = [
     title: "Save & Publish",
     description:
       "Save the catalog and publish it so the assigned company locations can immediately access their pricing.",
+    actionLabel: "View catalogs",
+    actionRoute: "/app/catalogs",
   },
 ];
 
 export default function HowItWorks() {
+  const navigate = useNavigate();
+
   return (
     <Card>
       <BlockStack gap="400">
@@ -56,8 +68,8 @@ export default function HowItWorks() {
 
         <Divider />
 
-        <InlineStack gap="400" wrap={false} align="space-between">
-          {HOW_IT_WORKS_STEPS.map((step, index) => (
+        <InlineStack gap="400" wrap={false} align="space-between" blockAlign="stretch">
+          {HOW_IT_WORKS_STEPS.map((step) => (
             <Box
               key={step.number}
               width="25%"
@@ -67,39 +79,47 @@ export default function HowItWorks() {
               borderRadius="200"
               background="bg-surface-secondary"
             >
-              <BlockStack gap="300">
-                {/* Step number + icon row */}
-                <InlineStack align="space-between" blockAlign="center">
-                  <div
-                    style={{
-                      width: 32,
-                      height: 32,
-                      borderRadius: "50%",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      flexShrink: 0,
-                    }}
-                  >
-                    <Text variant="bodyLg" fontWeight="bold" as="span">
-                      {step.number}
-                    </Text>
-                  </div>
-                  <div>
-                    <Icon source={step.icon} tone="brand" />
-                  </div>
-                </InlineStack>
+              <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+                <BlockStack gap="300">
+                  {/* Step number + icon row */}
+                  <InlineStack align="space-between" blockAlign="center">
+                    <div
+                      style={{
+                        width: 32,
+                        height: 32,
+                        borderRadius: "50%",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        flexShrink: 0,
+                      }}
+                    >
+                      <Text variant="bodyLg" fontWeight="bold" as="span">
+                        {step.number}
+                      </Text>
+                    </div>
+                    <div>
+                      <Icon source={step.icon} tone="brand" />
+                    </div>
+                  </InlineStack>
 
-                {/* Step content */}
-                <BlockStack gap="100">
-                  <Text variant="bodyMd" fontWeight="semibold" as="h3">
-                    {step.title}
-                  </Text>
-                  <Text variant="bodySm" tone="subdued">
-                    {step.description}
-                  </Text>
+                  {/* Step content */}
+                  <BlockStack gap="100">
+                    <Text variant="bodyMd" fontWeight="semibold" as="h3">
+                      {step.title}
+                    </Text>
+                    <Text variant="bodySm" tone="subdued">
+                      {step.description}
+                    </Text>
+                  </BlockStack>
                 </BlockStack>
-              </BlockStack>
+
+                <div style={{ marginTop: "auto", paddingTop: 12 }}>
+                  <Button size="slim" onClick={() => navigate(step.actionRoute)}>
+                    {step.actionLabel}
+                  </Button>
+                </div>
+              </div>
             </Box>
           ))}
         </InlineStack>

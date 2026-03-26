@@ -102,8 +102,8 @@ export default function Dashboard() {
     <Page title="Dashboard">
       <BlockStack gap="500">
         {/* Stats Row */}
-        <InlineStack>
-          <Box width="25%">
+        <InlineStack gap="400" wrap={false} align="start">
+          <Box width="calc((100% - (3 * var(--p-space-400))) / 4)">
             <StatCard
               label="Total companies"
               value={stats.totalCompanies.toString()}
@@ -111,7 +111,7 @@ export default function Dashboard() {
               trendType={stats.totalCompanies > 0 ? "success" : "subdued"}
             />
           </Box>
-          <Box width="25%">
+          <Box width="calc((100% - (3 * var(--p-space-400))) / 4)">
             <StatCard
               label="Active catalogs"
               value={stats.activeCatalogs.toString()}
@@ -119,7 +119,7 @@ export default function Dashboard() {
               trendType={stats.activeCatalogs > 0 ? "success" : "subdued"}
             />
           </Box>
-          <Box width="25%">
+          <Box width="calc((100% - (3 * var(--p-space-400))) / 4)">
             <StatCard
               label="Locations"
               value={stats.totalLocations.toString()}
@@ -127,7 +127,7 @@ export default function Dashboard() {
               trendType={stats.totalLocations > 0 ? "success" : "subdued"}
             />
           </Box>
-          <Box width="25%">
+          <Box width="calc((100% - (3 * var(--p-space-400))) / 4)">
             <StatCard
               label="Publications"
               value={stats.totalPublications.toString()}

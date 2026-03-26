@@ -38,6 +38,18 @@ import Decimal from "decimal.js";
 
 const parseDecimal = (value) => {
   if (!value) return 0;
+
+  // If it's already a Decimal (Prisma)
+  if (value instanceof Decimal) {
+    return value.toNumber();
+  }
+
+  // If it's an object (Prisma raw)
+  if (typeof value === "object" && value !== null) {
+    return new Decimal(value.toString()).toNumber();
+  }
+
+  // If it's string/number
   return new Decimal(value).toNumber();
 };
 
@@ -170,6 +182,8 @@ export default function AppCollectionId() {
   const shopify = useAppBridge();
   const params = useParams();
 
+  console.log("SW what is collection.discount", collection.discount);
+  
   // States
   const [editingPrices, setEditingPrices] = useState({});
   const [showAddProductModal, setShowAddProductModal] = useState(false);
