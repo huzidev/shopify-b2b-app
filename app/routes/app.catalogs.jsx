@@ -304,7 +304,7 @@ export default function Catalogs() {
                   {searchValue ? "No catalogs found matching your search." : "No catalogs found. Create your first catalog to get started."}
                 </Text>
                 {!searchValue && (
-                  <Button variant="primary" url="/app/create-catalog">
+                  <Button variant="primary" onClick={() => navigate("/app/create-catalog")}>
                     Create catalog
                   </Button>
                 )}
