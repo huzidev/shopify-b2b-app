@@ -1,6 +1,34 @@
 import prisma from "../db.server";
 import { getProductsForPublication } from "./product.server";
 
+function mergeLocationCatalogs(location) {
+  const linkedCatalogs = (location.catalogLocations || []).map((entry) => entry.catalog).filter(Boolean);
+  const primaryCatalogs = location.catalogs || [];
+  const mergedMap = new Map();
+
+  for (const catalog of [...linkedCatalogs, ...primaryCatalogs]) {
+    if (!mergedMap.has(catalog.id)) {
+      mergedMap.set(catalog.id, catalog);
+    }
+  }
+
+  return {
+    ...location,
+    catalogs: Array.from(mergedMap.values())
+  };
+}
+
+function normalizeCompanyLocationsWithCatalogs(company) {
+  if (!company || !company.locations) {
+    return company;
+  }
+
+  return {
+    ...company,
+    locations: company.locations.map(mergeLocationCatalogs)
+  };
+}
+
 // Get company by customer ID for quick order
 export async function getCompanyByCustomer(shop, customerId) {
   try {
@@ -34,6 +62,20 @@ export async function getCompanyByCustomer(shop, customerId) {
                       }
                     }
                   }
+                },
+                catalogLocations: {
+                  include: {
+                    catalog: {
+                      include: {
+                        priceList: true,
+                        publications: {
+                          include: {
+                            products: true
+                          }
+                        }
+                      }
+                    }
+                  }
                 }
               }
             }
@@ -42,7 +84,7 @@ export async function getCompanyByCustomer(shop, customerId) {
       }
     });
 
-    return companyCustomer?.company || null;
+    return normalizeCompanyLocationsWithCatalogs(companyCustomer?.company || null);
   } catch (error) {
     console.error("Error fetching company by customer:", error);
     return null;
@@ -114,6 +156,20 @@ export async function getCompany(shop, companyId) {
                   }
                 }
               }
+            },
+            catalogLocations: {
+              include: {
+                catalog: {
+                  include: {
+                    priceList: true,
+                    publications: {
+                      include: {
+                        products: true
+                      }
+                    }
+                  }
+                }
+              }
             }
           }
         },
@@ -158,10 +214,12 @@ export async function getCompany(shop, companyId) {
       return null;
     }
 
+    const normalizedCompany = normalizeCompanyLocationsWithCatalogs(company);
+
     // Fetch products with pricing for each location
     const locationProducts = [];
 
-    for (const location of company.locations) {
+    for (const location of normalizedCompany.locations) {
       if (location.catalogs.length === 0) {
         locationProducts.push({
           locationId: location.id,
@@ -211,9 +269,9 @@ export async function getCompany(shop, companyId) {
     }
 
     // Add the location products to the company object
-    company.locationProducts = locationProducts;
+    normalizedCompany.locationProducts = locationProducts;
 
-    return company;
+    return normalizedCompany;
   } catch (error) {
     console.error("Error fetching company:", error);
     return null;

@@ -1,5 +1,59 @@
 import prisma from "../db.server";
 
+async function upsertCompanyLocationsByShopifyIds(companyId, shopifyLocationIds) {
+  const normalizedIds = [...new Set((shopifyLocationIds || []).filter(Boolean))];
+  if (normalizedIds.length === 0) {
+    return [];
+  }
+
+  const existingLocations = await prisma.companyLocation.findMany({
+    where: {
+      companyId,
+      shopifyId: { in: normalizedIds }
+    }
+  });
+
+  const existingByShopifyId = new Map(existingLocations.map((location) => [location.shopifyId, location]));
+  const locations = [...existingLocations];
+
+  for (const shopifyId of normalizedIds) {
+    if (!existingByShopifyId.has(shopifyId)) {
+      const createdLocation = await prisma.companyLocation.create({
+        data: {
+          companyId,
+          shopifyId,
+          name: "Default Location"
+        }
+      });
+      locations.push(createdLocation);
+      existingByShopifyId.set(shopifyId, createdLocation);
+    }
+  }
+
+  return locations;
+}
+
+async function syncCatalogLocations(catalogId, companyId, shopifyLocationIds) {
+  const locations = await upsertCompanyLocationsByShopifyIds(companyId, shopifyLocationIds);
+  const locationIds = locations.map((location) => location.id);
+
+  await prisma.catalogLocation.deleteMany({
+    where: { catalogId }
+  });
+
+  if (locationIds.length > 0) {
+    await prisma.catalogLocation.createMany({
+      data: locationIds.map((locationId) => ({
+        catalogId,
+        locationId
+      })),
+      skipDuplicates: true
+    });
+  }
+
+  return locations;
+}
+
 async function fetchCatalogAssignedLocations(admin, catalogShopifyId) {
   if (!admin || !catalogShopifyId) {
     return [];
@@ -79,6 +133,11 @@ export async function getCatalogs(shop, admin = null) {
       include: {
         company: true,
         companyLocation: true,
+        catalogLocations: {
+          include: {
+            location: true
+          }
+        },
         priceList: true,
         publications: {
           include: {
@@ -98,9 +157,14 @@ export async function getCatalogs(shop, admin = null) {
 
     const catalogsWithLocationAssignments = await Promise.all(
       catalogs.map(async (catalog) => {
-        const assignedLocationIds = await fetchCatalogAssignedLocations(admin, catalog.shopifyId);
+        const dbAssignedLocationIds = catalog.catalogLocations?.map((entry) => entry.location?.shopifyId).filter(Boolean) || [];
+        const shopifyAssignedLocationIds = dbAssignedLocationIds.length === 0
+          ? await fetchCatalogAssignedLocations(admin, catalog.shopifyId)
+          : [];
         const fallbackLocationIds = catalog.companyLocation?.shopifyId ? [catalog.companyLocation.shopifyId] : [];
-        const resolvedLocationIds = assignedLocationIds.length > 0 ? assignedLocationIds : fallbackLocationIds;
+        const resolvedLocationIds = dbAssignedLocationIds.length > 0
+          ? dbAssignedLocationIds
+          : (shopifyAssignedLocationIds.length > 0 ? shopifyAssignedLocationIds : fallbackLocationIds);
 
         return {
           ...catalog,
@@ -138,6 +202,11 @@ export async function getCatalog(shop, catalogId, admin = null) {
       include: {
         company: true,
         companyLocation: true,
+        catalogLocations: {
+          include: {
+            location: true
+          }
+        },
         priceList: true,
         publications: {
           include: {
@@ -147,7 +216,14 @@ export async function getCatalog(shop, catalogId, admin = null) {
       }
     });
 
-    const assignedLocationIds = await fetchCatalogAssignedLocations(admin, catalog.shopifyId);
+    if (!catalog) {
+      return null;
+    }
+
+    const dbAssignedLocationIds = catalog.catalogLocations?.map((entry) => entry.location?.shopifyId).filter(Boolean) || [];
+    const assignedLocationIds = dbAssignedLocationIds.length > 0
+      ? dbAssignedLocationIds
+      : await fetchCatalogAssignedLocations(admin, catalog.shopifyId);
     const fallbackLocationIds = catalog.companyLocation?.shopifyId ? [catalog.companyLocation.shopifyId] : [];
     const resolvedLocationIds = assignedLocationIds.length > 0 ? assignedLocationIds : fallbackLocationIds;
 
@@ -218,6 +294,7 @@ export async function updateCatalog({
         shopId: dbShop.id
       },
       include: {
+        company: true,
         priceList: true,
         publications: true,
         companyLocation: true
@@ -354,6 +431,11 @@ export async function updateCatalog({
       include: {
         company: true,
         companyLocation: true,
+        catalogLocations: {
+          include: {
+            location: true
+          }
+        },
         priceList: true,
         publications: {
           include: {
@@ -363,16 +445,39 @@ export async function updateCatalog({
       }
     });
 
-    const assignedLocationIds = await fetchCatalogAssignedLocations(admin, catalog.shopifyId);
-    const fallbackLocationIds = updatedCatalog.companyLocation?.shopifyId ? [updatedCatalog.companyLocation.shopifyId] : [];
-    const resolvedLocationIds = assignedLocationIds.length > 0 ? assignedLocationIds : fallbackLocationIds;
+    if (normalizedLocationIds.length > 0) {
+      await syncCatalogLocations(updatedCatalog.id, catalog.companyId, normalizedLocationIds);
+    }
+
+    const refreshedCatalog = await prisma.catalog.findUnique({
+      where: { id: updatedCatalog.id },
+      include: {
+        company: true,
+        companyLocation: true,
+        catalogLocations: {
+          include: {
+            location: true
+          }
+        },
+        priceList: true,
+        publications: {
+          include: {
+            products: true
+          }
+        }
+      }
+    });
+
+    const resolvedLocationIds = refreshedCatalog?.catalogLocations?.map((entry) => entry.location?.shopifyId).filter(Boolean) || [];
+    const fallbackLocationIds = refreshedCatalog?.companyLocation?.shopifyId ? [refreshedCatalog.companyLocation.shopifyId] : [];
+    const finalLocationIds = resolvedLocationIds.length > 0 ? resolvedLocationIds : fallbackLocationIds;
 
     return {
       success: true,
       catalog: {
-        ...updatedCatalog,
-        assignedLocationIds: resolvedLocationIds,
-        assignedLocationCount: resolvedLocationIds.length
+        ...(refreshedCatalog || updatedCatalog),
+        assignedLocationIds: finalLocationIds,
+        assignedLocationCount: finalLocationIds.length
       }
     };
 
@@ -542,22 +647,12 @@ export async function createCatalog({
       }
     }
 
-    // Find or create company location in database
-    const primaryLocationId = normalizedLocationIds[0];
+    // Find or create selected company locations in database
+    const dbLocations = await upsertCompanyLocationsByShopifyIds(company.id, normalizedLocationIds);
+    const primaryLocation = dbLocations[0];
 
-    let dbLocation = await prisma.companyLocation.findUnique({
-      where: { shopifyId: primaryLocationId }
-    });
-
-    if (!dbLocation) {
-      // If location doesn't exist, create it (this shouldn't happen if createCompany worked correctly)
-      dbLocation = await prisma.companyLocation.create({
-        data: {
-          companyId: company.id,
-          shopifyId: primaryLocationId,
-          name: "Default Location"
-        }
-      });
+    if (!primaryLocation) {
+      return { success: false, error: "Unable to resolve selected company locations" };
     }
 
     // Save catalog to database
@@ -565,7 +660,7 @@ export async function createCatalog({
       data: {
         shopId: dbShop.id,
         companyId: company.id,
-        companyLocationId: dbLocation.id,
+        companyLocationId: primaryLocation.id,
         priceListId: selectedPriceList.id,
         shopifyId: catalog.id,
         title: catalog.title,
@@ -574,13 +669,23 @@ export async function createCatalog({
       }
     });
 
+    await prisma.catalogLocation.createMany({
+      data: dbLocations.map((location) => ({
+        catalogId: dbCatalog.id,
+        locationId: location.id
+      })),
+      skipDuplicates: true
+    });
+
     return { 
       success: true, 
       catalog: {
         id: dbCatalog.id,
         shopifyId: catalog.id,
         title: catalog.title,
-        status: catalog.status
+        status: catalog.status,
+        assignedLocationIds: dbLocations.map((location) => location.shopifyId),
+        assignedLocationCount: dbLocations.length
       }
     };
 
