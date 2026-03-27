@@ -295,6 +295,9 @@ export const action = async ({ request }) => {
 export const loader = async ({ request }) => {
   console.log("SW PROXY HAS RUN");
 
+  console.log("SW what is request on test???");
+  console.log("SW what is request on test??? V2", request);
+
   const { liquid, admin } = await authenticate.public.appProxy(request);
 
   const url = new URL(request.url);
