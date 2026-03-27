@@ -36,7 +36,7 @@ export const loader = async ({ request, params }) => {
   const { getProductsByIds, getAllAvailableProducts } = await import("../models/product.server");
   const { getCompanies } = await import("../models/company.server");
   
-  const catalog = await getCatalog(session.shop, params.id);
+  const catalog = await getCatalog(session.shop, params.id, admin);
   
   if (!catalog) {
     return { 
@@ -156,7 +156,7 @@ export const action = async ({ request, params }) => {
       const selectedProductIds = JSON.parse(formData.get("selectedProductIds") || "[]");
       
       // Get the catalog's publication
-      const catalog = await getCatalog(session.shop, catalogId);
+      const catalog = await getCatalog(session.shop, catalogId, admin);
       if (!catalog || !catalog.publications || catalog.publications.length === 0) {
         return { success: false, error: "No publication found for this catalog" };
       }
@@ -180,7 +180,7 @@ export const action = async ({ request, params }) => {
       const selectedProductIds = JSON.parse(formData.get("selectedProductIds") || "[]");
       
       // Get the catalog's publication
-      const catalog = await getCatalog(session.shop, catalogId);
+      const catalog = await getCatalog(session.shop, catalogId, admin);
       if (!catalog || !catalog.publications || catalog.publications.length === 0) {
         return { success: false, error: "No publication found for this catalog" };
       }
@@ -201,14 +201,14 @@ export const action = async ({ request, params }) => {
     
     if (actionType === "updateLocation") {
       const catalogId = params.id;
-      const newLocationId = formData.get("newLocationId");
+      const selectedLocationIds = JSON.parse(formData.get("selectedLocationIds") || "[]");
       
       // Update catalog with new location
       const result = await updateCatalog({
         admin,
         shop: session.shop,
         catalogId,
-        newLocationId
+        newLocationIds: selectedLocationIds
       });
       
       return result;
@@ -233,6 +233,9 @@ export default function CatalogDetail() {
   const [addProductsModalOpen, setAddProductsModalOpen] = useState(false);
   const [pricingModalOpen, setPricingModalOpen] = useState(false);
   const [companyModalOpen, setCompanyModalOpen] = useState(false);
+  const [confirmLocationRemovalOpen, setConfirmLocationRemovalOpen] = useState(false);
+  const [pendingLocationIds, setPendingLocationIds] = useState([]);
+  const [locationsToRemove, setLocationsToRemove] = useState([]);
   const [duplicateModalOpen, setDuplicateModalOpen] = useState(false);
   
   // Product selection states
@@ -263,7 +266,7 @@ export default function CatalogDetail() {
   
   // Company location form data
   const [companyFormData, setCompanyFormData] = useState({
-    selectedLocationId: catalog?.companyLocation?.shopifyId || ""
+    selectedLocationIds: catalog?.assignedLocationIds || (catalog?.companyLocation?.shopifyId ? [catalog.companyLocation.shopifyId] : [])
   });
   
   // Duplicate catalog form data
@@ -296,7 +299,7 @@ export default function CatalogDetail() {
       
       // Update company form data
       setCompanyFormData({
-        selectedLocationId: catalog.companyLocation?.shopifyId || ""
+        selectedLocationIds: catalog.assignedLocationIds || (catalog.companyLocation?.shopifyId ? [catalog.companyLocation.shopifyId] : [])
       });
     }
     setHasChanges(false);
@@ -324,9 +327,12 @@ export default function CatalogDetail() {
         adjustmentType: pricingFormData.adjustmentType,
         adjustmentValue: pricingFormData.adjustmentValue
       };
+
+      const normalizedCurrentIds = [...(companyFormData.selectedLocationIds || [])].sort();
+      const normalizedOriginalIds = [...(catalog.assignedLocationIds || (catalog.companyLocation?.shopifyId ? [catalog.companyLocation.shopifyId] : []))].sort();
       
       const hasFormChanges = JSON.stringify(originalData) !== JSON.stringify(currentData);
-      const hasLocationChanges = companyFormData.selectedLocationId !== (catalog.companyLocation?.shopifyId || "");
+      const hasLocationChanges = JSON.stringify(normalizedCurrentIds) !== JSON.stringify(normalizedOriginalIds);
       
       setHasChanges(hasFormChanges || hasLocationChanges);
     }
@@ -413,16 +419,45 @@ export default function CatalogDetail() {
   
   // Handle location update
   const handleUpdateLocation = useCallback(() => {
+    const currentAssignedIds = catalog?.assignedLocationIds || (catalog?.companyLocation?.shopifyId ? [catalog.companyLocation.shopifyId] : []);
+    const nextSelectedIds = companyFormData.selectedLocationIds || [];
+
+    const removedIds = currentAssignedIds.filter((id) => !nextSelectedIds.includes(id));
+
+    if (removedIds.length > 0) {
+      const companyLocations = companies?.find((company) => company.id === catalog?.companyId)?.locations || [];
+      const removedLocations = companyLocations.filter((location) => removedIds.includes(location.shopifyId));
+      setLocationsToRemove(removedLocations);
+      setPendingLocationIds(nextSelectedIds);
+      setConfirmLocationRemovalOpen(true);
+      return;
+    }
+
     fetcher.submit(
       {
         actionType: "updateLocation",
-        newLocationId: companyFormData.selectedLocationId
+        selectedLocationIds: JSON.stringify(nextSelectedIds)
       },
       { method: "POST" }
     );
     
     setCompanyModalOpen(false);
-  }, [companyFormData, fetcher]);
+  }, [companyFormData, fetcher, catalog, companies]);
+
+  const confirmLocationUpdate = useCallback(() => {
+    fetcher.submit(
+      {
+        actionType: "updateLocation",
+        selectedLocationIds: JSON.stringify(pendingLocationIds)
+      },
+      { method: "POST" }
+    );
+
+    setConfirmLocationRemovalOpen(false);
+    setCompanyModalOpen(false);
+    setPendingLocationIds([]);
+    setLocationsToRemove([]);
+  }, [fetcher, pendingLocationIds]);
   
   // Handle duplicate catalog
   const handleDuplicateCatalog = useCallback(() => {
@@ -529,12 +564,16 @@ export default function CatalogDetail() {
   // Get current company and locations for company modal
   const currentCompany = companies?.find(c => c.id === catalog?.companyId);
   const availableLocations = currentCompany?.locations || [];
+  const assignedLocationIds = catalog.assignedLocationIds || (catalog.companyLocation?.shopifyId ? [catalog.companyLocation.shopifyId] : []);
+  const assignedLocationNames = availableLocations
+    .filter((location) => assignedLocationIds.includes(location.shopifyId))
+    .map((location) => location.name);
 
   // Create assignments from catalog data
   const assignments = catalog.company ? [
     { 
       company: catalog.company.name, 
-      location: catalog.companyLocation?.name || "All locations", 
+      location: assignedLocationNames.length > 0 ? `${assignedLocationNames.length} location${assignedLocationNames.length === 1 ? "" : "s"}` : (catalog.companyLocation?.name || "All locations"), 
       status: "Active" 
     }
   ] : [];
@@ -941,7 +980,7 @@ export default function CatalogDetail() {
           content: "Update",
           onAction: handleUpdateLocation,
           loading: isLoading,
-          disabled: isLoading || !companyFormData.selectedLocationId
+          disabled: isLoading || !companyFormData.selectedLocationIds || companyFormData.selectedLocationIds.length === 0
         }}
         secondaryActions={[
           {
@@ -957,15 +996,25 @@ export default function CatalogDetail() {
             </Text>
             
             {availableLocations.length > 0 ? (
-              <Select
-                label="Company Location"
-                options={availableLocations.map(location => ({
-                  label: location.name,
-                  value: location.shopifyId
-                }))}
-                value={companyFormData.selectedLocationId}
-                onChange={(value) => handleCompanyFieldChange('selectedLocationId', value)}
-              />
+              <BlockStack gap="200">
+                <Text variant="bodySm" tone="subdued">
+                  Select one or more locations for this catalog.
+                </Text>
+                {availableLocations.map((location) => (
+                  <Checkbox
+                    key={location.id}
+                    label={location.name}
+                    checked={(companyFormData.selectedLocationIds || []).includes(location.shopifyId)}
+                    onChange={(checked) => {
+                      const currentIds = companyFormData.selectedLocationIds || [];
+                      const nextIds = checked
+                        ? [...currentIds, location.shopifyId]
+                        : currentIds.filter((id) => id !== location.shopifyId);
+                      handleCompanyFieldChange('selectedLocationIds', nextIds);
+                    }}
+                  />
+                ))}
+              </BlockStack>
             ) : (
               <Banner status="warning">
                 <Text as="p">
@@ -1030,6 +1079,50 @@ export default function CatalogDetail() {
             
             <Text variant="bodySm" tone="subdued">
               This will create a new catalog with the same products and pricing rules as the current one.
+            </Text>
+          </BlockStack>
+        </Modal.Section>
+      </Modal>
+
+      {/* Confirm Location Removal Modal */}
+      <Modal
+        open={confirmLocationRemovalOpen}
+        onClose={() => {
+          setConfirmLocationRemovalOpen(false);
+          setPendingLocationIds([]);
+          setLocationsToRemove([]);
+        }}
+        title="Confirm Location Removal"
+        primaryAction={{
+          content: "Remove and Update",
+          destructive: true,
+          onAction: confirmLocationUpdate,
+          loading: isLoading,
+          disabled: isLoading,
+        }}
+        secondaryActions={[
+          {
+            content: "Cancel",
+            onAction: () => {
+              setConfirmLocationRemovalOpen(false);
+              setPendingLocationIds([]);
+              setLocationsToRemove([]);
+            },
+          },
+        ]}
+      >
+        <Modal.Section>
+          <BlockStack gap="300">
+            <Text variant="bodyMd">
+              You are removing this catalog from the following location(s):
+            </Text>
+            <List>
+              {locationsToRemove.map((location) => (
+                <List.Item key={location.id}>{location.name}</List.Item>
+              ))}
+            </List>
+            <Text variant="bodySm" tone="subdued">
+              Products from this catalog will no longer be available for removed locations.
             </Text>
           </BlockStack>
         </Modal.Section>

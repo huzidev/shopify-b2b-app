@@ -23,8 +23,8 @@ import {
 import { SearchIcon, SortIcon, ChevronDownIcon } from "@shopify/polaris-icons";
 
 export const loader = async ({ request }) => {
-  const { session } = await authenticate.admin(request);
-  const catalogs = await getCatalogs(session.shop);
+  const { session, admin } = await authenticate.admin(request);
+  const catalogs = await getCatalogs(session.shop, admin);
   
   return { catalogs };
 };
@@ -55,6 +55,7 @@ export default function Catalogs() {
     id: catalog.id,
     name: catalog.title,
     products: catalog.publications?.reduce((total, pub) => total + (pub.products?.length || 0), 0) || 0,
+    locations: catalog.assignedLocationCount ?? (catalog.companyLocation ? 1 : 0),
     assignedCompanies: 1, // For now, each catalog is assigned to one company
     companyName: catalog.company?.name || "N/A",
     status: catalog.status || "Active"
@@ -206,7 +207,7 @@ export default function Catalogs() {
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "40px minmax(0, 2fr) 80px minmax(0, 1.5fr) 110px 70px",
+                gridTemplateColumns: "40px minmax(0, 2fr) 80px 90px minmax(0, 1.5fr) 110px 70px",
                 alignItems: "center",
                 gap: "12px",
               }}
@@ -224,6 +225,9 @@ export default function Catalogs() {
               </Text>
               <Text variant="bodySm" fontWeight="semibold" tone="subdued">
                 Products
+              </Text>
+              <Text variant="bodySm" fontWeight="semibold" tone="subdued">
+                Locations
               </Text>
               <Text variant="bodySm" fontWeight="semibold" tone="subdued">
                 Assigned company
@@ -253,7 +257,7 @@ export default function Catalogs() {
                     <div
                       style={{
                         display: "grid",
-                        gridTemplateColumns: "40px minmax(0, 2fr) 80px minmax(0, 1.5fr) 110px 70px",
+                        gridTemplateColumns: "40px minmax(0, 2fr) 80px 90px minmax(0, 1.5fr) 110px 70px",
                         alignItems: "center",
                         gap: "12px",
                       }}
@@ -267,6 +271,9 @@ export default function Catalogs() {
                       </Text>
                       <Text variant="bodyMd">
                         {catalog.products}
+                      </Text>
+                      <Text variant="bodyMd">
+                        {catalog.locations}
                       </Text>
                       <Text variant="bodyMd" tone="subdued" truncate>
                         {catalog.companyName}

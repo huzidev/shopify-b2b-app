@@ -410,12 +410,20 @@ export const loader = async ({ request }) => {
 
   console.log("SW what is location data", locationData);
 
+  const defaultLocationShopifyId = company.locations[0]?.shopifyId || "";
+  const locationOptionsHtml = company.locations
+    .map(
+      (location) =>
+        `<option value="${location.shopifyId}" ${location.shopifyId === defaultLocationShopifyId ? "selected" : ""}>${location.name}</option>`
+    )
+    .join("");
+
   // Generate HTML for products grouped by location and catalog
   const locationSections = locationData.map((locationInfo, locationIndex) => {
     // Handle location with no catalogs
     if (locationInfo.hasNoCatalogs) {
       return `
-        <div class="location-section">
+        <div class="location-section" data-location-shopify-id="${locationInfo.locationShopifyId}">
           <div class="location-header">
             <h3>${locationInfo.locationName}</h3>
           </div>
@@ -450,7 +458,7 @@ export const loader = async ({ request }) => {
       }
 
       return `
-        <div class="location-section">
+        <div class="location-section" data-location-shopify-id="${locationInfo.locationShopifyId}">
           <div class="location-header">
             <h3>${locationInfo.locationName} - ${locationInfo.catalogTitle}</h3>
             ${adjustmentText ? `<span class="discount-badge">${adjustmentText}</span>` : ""}
@@ -500,7 +508,7 @@ export const loader = async ({ request }) => {
     `).join("");
 
     return `
-      <div class="location-section">
+      <div class="location-section" data-location-shopify-id="${locationInfo.locationShopifyId}">
         <div class="location-header">
           <h3>${locationInfo.locationName} - ${locationInfo.catalogTitle}</h3>
           ${adjustmentText ? `<span class="discount-badge">${adjustmentText}</span>` : ""}
@@ -614,6 +622,22 @@ export const loader = async ({ request }) => {
         box-shadow: 0 4px 12px rgba(40,167,69,0.4);
       }
       .locations-container { margin-top: 20px; }
+      .location-filter-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin: 16px 0;
+      }
+      .location-filter-row label {
+        font-weight: 600;
+      }
+      .location-filter-row select {
+        min-width: 260px;
+        padding: 8px 10px;
+        border: 1px solid #ccc;
+        border-radius: 6px;
+        background: #fff;
+      }
     </style>
 
     <div class="quick-order-container">
@@ -621,6 +645,13 @@ export const loader = async ({ request }) => {
         <h1>Quick Order - ${company.name}</h1>
       </div>
       <p>Shop: {{shop.name}} | Currency: ${currency}</p>
+
+      <div class="location-filter-row">
+        <label for="locationFilter">Select Location:</label>
+        <select id="locationFilter" name="locationFilter">
+          ${locationOptionsHtml}
+        </select>
+      </div>
       
       <form id="quickOrderForm" method="POST">
         <input type="hidden" name="orderData" id="orderDataInput" />
@@ -666,6 +697,25 @@ export const loader = async ({ request }) => {
         const totalItemsEl = document.getElementById('totalItems');
         const orderTotalEl = document.getElementById('orderTotal');
         const orderBtn = document.getElementById('orderBtn');
+        const locationFilter = document.getElementById('locationFilter');
+
+        function applyLocationFilter() {
+          const selectedLocationShopifyId = locationFilter ? locationFilter.value : '';
+
+          document.querySelectorAll('.location-section').forEach((section) => {
+            const isVisible = section.dataset.locationShopifyId === selectedLocationShopifyId;
+            section.style.display = isVisible ? 'block' : 'none';
+
+            section.querySelectorAll('.qty-input').forEach((input) => {
+              if (!isVisible) {
+                input.value = '0';
+              }
+              input.disabled = !isVisible;
+            });
+          });
+
+          updateSummary();
+        }
         
         // Re-order function - directly creates order
         window.reorderItems = function(orderIndex) {
@@ -762,6 +812,10 @@ export const loader = async ({ request }) => {
           const lineItems = [];
           
           document.querySelectorAll('.qty-input').forEach((input) => {
+            if (input.disabled) {
+              return;
+            }
+
             const qty = parseInt(input.value) || 0;
             const locationIndex = parseInt(input.dataset.locationIndex);
             const productIndex = parseInt(input.dataset.productIndex);
@@ -799,6 +853,10 @@ export const loader = async ({ request }) => {
           input.addEventListener('change', updateSummary);
           input.addEventListener('input', updateSummary);
         });
+
+        if (locationFilter) {
+          locationFilter.addEventListener('change', applyLocationFilter);
+        }
         
         // Form submission
         form.addEventListener('submit', function(e) {
@@ -810,8 +868,8 @@ export const loader = async ({ request }) => {
           orderBtn.disabled = true;
         });
         
-        // Initial calculation
-        updateSummary();
+        // Initial filter + calculation
+        applyLocationFilter();
       })();
     </script>
   `);

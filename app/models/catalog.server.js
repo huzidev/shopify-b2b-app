@@ -1,5 +1,41 @@
 import prisma from "../db.server";
 
+async function fetchCatalogAssignedLocations(admin, catalogShopifyId) {
+  if (!admin || !catalogShopifyId) {
+    return [];
+  }
+
+  try {
+    const response = await admin.graphql(
+      `#graphql
+        query getCatalogAssignedLocations($id: ID!) {
+          catalog(id: $id) {
+            context {
+              ... on CompanyLocationCatalogContext {
+                companyLocations(first: 250) {
+                  nodes {
+                    id
+                  }
+                }
+              }
+            }
+          }
+        }
+      `,
+      {
+        variables: { id: catalogShopifyId }
+      }
+    );
+
+    const data = await response.json();
+    const nodes = data?.data?.catalog?.context?.companyLocations?.nodes || [];
+    return nodes.map((node) => node.id).filter(Boolean);
+  } catch (error) {
+    console.warn("Unable to fetch catalog assigned locations from Shopify:", error?.message || error);
+    return [];
+  }
+}
+
 // Check if catalog title exists
 export async function getCatalogByTitle(shop, title) {
   try {
@@ -26,7 +62,7 @@ export async function getCatalogByTitle(shop, title) {
 }
 
 // Get all catalogs for a shop
-export async function getCatalogs(shop) {
+export async function getCatalogs(shop, admin = null) {
   try {
     const dbShop = await prisma.shop.findUnique({
       where: { shopDomain: shop }
@@ -60,9 +96,23 @@ export async function getCatalogs(shop) {
       }
     });
 
-    console.log("SW what is catalogs from backend?", catalogs);
+    const catalogsWithLocationAssignments = await Promise.all(
+      catalogs.map(async (catalog) => {
+        const assignedLocationIds = await fetchCatalogAssignedLocations(admin, catalog.shopifyId);
+        const fallbackLocationIds = catalog.companyLocation?.shopifyId ? [catalog.companyLocation.shopifyId] : [];
+        const resolvedLocationIds = assignedLocationIds.length > 0 ? assignedLocationIds : fallbackLocationIds;
 
-    return catalogs;
+        return {
+          ...catalog,
+          assignedLocationIds: resolvedLocationIds,
+          assignedLocationCount: resolvedLocationIds.length
+        };
+      })
+    );
+
+    console.log("SW what is catalogs from backend?", catalogsWithLocationAssignments);
+
+    return catalogsWithLocationAssignments;
   } catch (error) {
     console.error("Error fetching catalogs:", error);
     return [];
@@ -70,7 +120,7 @@ export async function getCatalogs(shop) {
 }
 
 // Get a single catalog with details
-export async function getCatalog(shop, catalogId) {
+export async function getCatalog(shop, catalogId, admin = null) {
   try {
     const dbShop = await prisma.shop.findUnique({
       where: { shopDomain: shop }
@@ -97,7 +147,15 @@ export async function getCatalog(shop, catalogId) {
       }
     });
 
-    return catalog;
+    const assignedLocationIds = await fetchCatalogAssignedLocations(admin, catalog.shopifyId);
+    const fallbackLocationIds = catalog.companyLocation?.shopifyId ? [catalog.companyLocation.shopifyId] : [];
+    const resolvedLocationIds = assignedLocationIds.length > 0 ? assignedLocationIds : fallbackLocationIds;
+
+    return {
+      ...catalog,
+      assignedLocationIds: resolvedLocationIds,
+      assignedLocationCount: resolvedLocationIds.length
+    };
   } catch (error) {
     console.error("Error fetching catalog:", error);
     return null;
@@ -141,7 +199,8 @@ export async function updateCatalog({
   status,
   priceListId,
   publicationId,
-  newLocationId
+  newLocationId,
+  newLocationIds
 }) {
   try {
     const dbShop = await prisma.shop.findUnique({
@@ -186,10 +245,18 @@ export async function updateCatalog({
     if (title) updateInput.title = title;
     if (status) updateInput.status = status;
     
+    const normalizedLocationIds = Array.isArray(newLocationIds)
+      ? newLocationIds.filter(Boolean)
+      : newLocationIds
+        ? [newLocationIds]
+        : newLocationId
+          ? [newLocationId]
+          : [];
+
     // Add context with company location IDs if location is being updated
-    if (newLocationId) {
+    if (normalizedLocationIds.length > 0) {
       updateInput.context = {
-        companyLocationIds: [newLocationId]
+        companyLocationIds: normalizedLocationIds
       };
     }
     
@@ -271,10 +338,10 @@ export async function updateCatalog({
     if (title) updateData.title = title;
     if (status) updateData.status = status;
     
-    // Update company location if provided
-    if (newLocationId) {
+    // Update primary company location if provided
+    if (normalizedLocationIds.length > 0) {
       const newDbLocation = await prisma.companyLocation.findUnique({
-        where: { shopifyId: newLocationId }
+        where: { shopifyId: normalizedLocationIds[0] }
       });
       if (newDbLocation) {
         updateData.companyLocationId = newDbLocation.id;
@@ -296,9 +363,17 @@ export async function updateCatalog({
       }
     });
 
+    const assignedLocationIds = await fetchCatalogAssignedLocations(admin, catalog.shopifyId);
+    const fallbackLocationIds = updatedCatalog.companyLocation?.shopifyId ? [updatedCatalog.companyLocation.shopifyId] : [];
+    const resolvedLocationIds = assignedLocationIds.length > 0 ? assignedLocationIds : fallbackLocationIds;
+
     return {
       success: true,
-      catalog: updatedCatalog
+      catalog: {
+        ...updatedCatalog,
+        assignedLocationIds: resolvedLocationIds,
+        assignedLocationCount: resolvedLocationIds.length
+      }
     };
 
   } catch (error) {
