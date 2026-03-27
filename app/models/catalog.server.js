@@ -314,7 +314,7 @@ export async function createCatalog({
   admin,
   shop,
   companyId,
-  locationId,
+  locationIds,
   priceListId,
   publicationId,
   title
@@ -338,6 +338,16 @@ export async function createCatalog({
 
     if (!company) {
       return { success: false, error: "Company not found" };
+    }
+
+    const normalizedLocationIds = Array.isArray(locationIds)
+      ? locationIds.filter(Boolean)
+      : locationIds
+        ? [locationIds]
+        : [];
+
+    if (normalizedLocationIds.length === 0) {
+      return { success: false, error: "At least one company location must be selected" };
     }
 
     // Get selected price list from database
@@ -375,7 +385,7 @@ export async function createCatalog({
       title: title,
       status: "ACTIVE",
       context: {
-        companyLocationIds: [locationId]
+        companyLocationIds: normalizedLocationIds
       },
       priceListId: selectedPriceList.shopifyId
     };
@@ -458,8 +468,10 @@ export async function createCatalog({
     }
 
     // Find or create company location in database
+    const primaryLocationId = normalizedLocationIds[0];
+
     let dbLocation = await prisma.companyLocation.findUnique({
-      where: { shopifyId: locationId }
+      where: { shopifyId: primaryLocationId }
     });
 
     if (!dbLocation) {
@@ -467,7 +479,7 @@ export async function createCatalog({
       dbLocation = await prisma.companyLocation.create({
         data: {
           companyId: company.id,
-          shopifyId: locationId,
+          shopifyId: primaryLocationId,
           name: "Default Location"
         }
       });
