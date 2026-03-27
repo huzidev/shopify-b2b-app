@@ -104,12 +104,13 @@ model Company {
 }
 
 model CompanyLocation {
-  id        Int       @id @default(autoincrement())
-  companyId Int
-  shopifyId String    @unique
-  name      String
-  catalogs  Catalog[]
-  company   Company   @relation(fields: [companyId], references: [id])
+  id               Int               @id @default(autoincrement())
+  companyId        Int
+  shopifyId        String            @unique
+  name             String
+  catalogs         Catalog[]         @relation("PrimaryCatalogLocation")
+  catalogLocations CatalogLocation[]
+  company          Company           @relation(fields: [companyId], references: [id])
 }
 
 model CompanyCustomer {
@@ -127,7 +128,7 @@ model CompanyCustomer {
 }
 
 model Catalog {
-  id                   Int              @id @default(autoincrement())
+  id                   Int               @id @default(autoincrement())
   shopId               Int
   companyId            Int
   companyLocationId    Int?
@@ -136,12 +137,13 @@ model Catalog {
   title                String
   status               String
   publicationShopifyId String
-  createdAt            DateTime         @default(now())
-  updatedAt            DateTime         @updatedAt
-  company              Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  companyLocation      CompanyLocation? @relation(fields: [companyLocationId], references: [id])
-  priceList            PriceList?       @relation(fields: [priceListId], references: [id])
-  shop                 Shop             @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+  company              Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  companyLocation      CompanyLocation?  @relation("PrimaryCatalogLocation", fields: [companyLocationId], references: [id])
+  catalogLocations     CatalogLocation[]
+  priceList            PriceList?        @relation(fields: [priceListId], references: [id])
+  shop                 Shop              @relation(fields: [shopId], references: [id], onDelete: Cascade)
   publications         Publication[]
 
   @@unique([shopifyId, shopId])
@@ -149,6 +151,20 @@ model Catalog {
   @@index([companyId])
   @@index([companyLocationId])
   @@index([priceListId])
+}
+
+model CatalogLocation {
+  id         Int             @id @default(autoincrement())
+  catalogId  Int
+  locationId Int
+  createdAt  DateTime        @default(now())
+  catalog    Catalog         @relation(fields: [catalogId], references: [id], onDelete: Cascade)
+  location   CompanyLocation @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@unique([catalogId, locationId])
+  @@index([catalogId])
+  @@index([locationId])
+  @@map("catalog_locations")
 }
 
 model PriceList {
