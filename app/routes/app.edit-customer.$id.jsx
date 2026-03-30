@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useLoaderData, useNavigate, useFetcher } from "react-router";
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
+import { updateCustomerProfile } from "../models/customer.server";
 import {
   Page,
   Layout,
@@ -53,25 +54,6 @@ export const action = async ({ request, params }) => {
   const formData = await request.formData();
   const actionType = formData.get("actionType");
 
-  const shop = await db.shop.findUnique({
-    where: { shopDomain: session.shop },
-  });
-
-  if (!shop) {
-    return { success: false, error: "Shop not found" };
-  }
-
-  const customer = await db.customer.findFirst({
-    where: {
-      shopifyNumericId: customerId,
-      shopId: shop.id,
-    },
-  });
-
-  if (!customer) {
-    return { success: false, error: "Customer not found" };
-  }
-
   try {
     if (actionType === "updateCustomer") {
       const firstName = (formData.get("firstName") || "").toString().trim();
@@ -79,61 +61,12 @@ export const action = async ({ request, params }) => {
       const email = (formData.get("email") || "").toString().trim();
       const phone = (formData.get("phone") || "").toString().trim();
 
-      // Update in local database
-      const updatedCustomer = await db.customer.update({
-        where: { id: customer.id },
-        data: {
-          firstName: firstName || null,
-          lastName: lastName || null,
-          email: email || null,
-          phone: phone || null,
-        },
+      return updateCustomerProfile(admin, session.shop, customerId, {
+        firstName,
+        lastName,
+        email,
+        phone,
       });
-
-      // Update in Shopify via metafields
-      const customerGid = `gid://shopify/Customer/${customer.shopifyCustomerId}`;
-      
-      const metafieldResponse = await admin.graphql(
-        `#graphql
-        mutation updateCustomerMetafields($input: CustomerInput!) {
-          customerUpdate(input: $input) {
-            customer {
-              id
-              firstName
-              lastName
-              email
-            }
-            userErrors {
-              message
-              field
-            }
-          }
-        }`,
-        {
-          variables: {
-            input: {
-              id: customerGid,
-              firstName: firstName || undefined,
-              lastName: lastName || undefined,
-              email: email || undefined,
-              phone: phone || undefined,
-            },
-          },
-        },
-      );
-
-      const json = await metafieldResponse.json();
-      const result = json?.data?.customerUpdate;
-
-      if (result?.userErrors?.length > 0) {
-        return { success: false, error: result.userErrors[0].message };
-      }
-
-      return { 
-        success: true, 
-        message: "Customer updated successfully",
-        customer: updatedCustomer 
-      };
     }
 
     return { success: false, error: "Invalid action type" };

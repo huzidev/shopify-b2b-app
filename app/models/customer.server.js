@@ -479,6 +479,106 @@ export async function updateCustomerMetafields(admin, customerId, metafields) {
   }
 }
 
+function resolveCustomerGid(shopifyCustomerId) {
+  if (!shopifyCustomerId) return null;
+  const raw = String(shopifyCustomerId).trim();
+  if (!raw) return null;
+  if (raw.startsWith("gid://shopify/Customer/")) return raw;
+  return `gid://shopify/Customer/${raw}`;
+}
+
+export async function updateCustomerProfile(admin, shop, customerNumericId, input) {
+  try {
+    const dbShop = await getShopRecord(shop);
+    if (!dbShop) {
+      return { success: false, error: "Shop not found" };
+    }
+
+    const customer = await db.customer.findFirst({
+      where: {
+        shopifyNumericId: String(customerNumericId),
+        shopId: dbShop.id,
+      },
+    });
+
+    if (!customer) {
+      return { success: false, error: "Customer not found" };
+    }
+
+    const firstName = (input?.firstName || "").toString().trim();
+    const lastName = (input?.lastName || "").toString().trim();
+    const email = (input?.email || "").toString().trim();
+    const phone = (input?.phone || "").toString().trim();
+
+    const customerGid = resolveCustomerGid(customer.shopifyCustomerId || customer.shopifyNumericId);
+    if (!customerGid) {
+      return { success: false, error: "Invalid Shopify customer ID" };
+    }
+
+    // Update Shopify first. Local DB is updated only when Shopify succeeds.
+    const response = await admin.graphql(
+      `#graphql
+      mutation updateCustomer($input: CustomerInput!) {
+        customerUpdate(input: $input) {
+          customer {
+            id
+            firstName
+            lastName
+            email
+            phone
+          }
+          userErrors {
+            message
+            field
+          }
+        }
+      }`,
+      {
+        variables: {
+          input: {
+            id: customerGid,
+            firstName: firstName || undefined,
+            lastName: lastName || undefined,
+            email: email || undefined,
+            phone: phone || undefined,
+          },
+        },
+      },
+    );
+
+    const json = await response.json();
+    const result = json?.data?.customerUpdate;
+
+    if (!result) {
+      return { success: false, error: "No response from Shopify" };
+    }
+
+    if (result.userErrors?.length > 0) {
+      return { success: false, error: result.userErrors[0].message };
+    }
+
+    const updatedCustomer = await db.customer.update({
+      where: { id: customer.id },
+      data: {
+        firstName: firstName || null,
+        lastName: lastName || null,
+        email: email || null,
+        phone: phone || null,
+      },
+    });
+
+    return {
+      success: true,
+      message: "Customer updated successfully",
+      customer: updatedCustomer,
+      shopifyCustomer: result.customer,
+    };
+  } catch (error) {
+    console.error("Error updating customer profile:", error);
+    return { success: false, error: error.message };
+  }
+}
+
 export async function getCustomerOrders(shop, customerId) {
   try {
     const orders = await db.order.findMany({
