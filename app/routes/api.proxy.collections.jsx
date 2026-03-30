@@ -1,13 +1,96 @@
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
-import { getCompanyByCustomer } from "../models/company.server";
-import { getProductsForPublication } from "../models/product.server";
+import { createOrder, getCustomerOrderHistory } from "../models/order.server";
+import { getCustomerWithCollectionsAndLocations } from "../models/customer.server";
 
-// Show catalog products for customer, filtered by selected company location
+// Handle POST request for order creation
+export const action = async ({ request }) => {
+  const { liquid, admin } = await authenticate.public.appProxy(request);
+
+  const formData = await request.formData();
+  const orderDataRaw = formData.get("orderData");
+
+  if (!orderDataRaw) {
+    return liquid(`
+      <div class="quick-order-error">
+        <h2>Error</h2>
+        <p>No order data provided.</p>
+      </div>
+    `);
+  }
+
+  try {
+    const orderData = JSON.parse(orderDataRaw);
+
+    const url = new URL(request.url);
+    const shop = url.searchParams.get("shop");
+    const customerId = url.searchParams.get("logged_in_customer_id");
+
+    const shopRecord = await db.shop.findUnique({
+      where: { shopDomain: shop },
+    });
+
+    const collectionIds = Array.from(
+      new Set(
+        (orderData.lineItems || [])
+          .map((item) => Number(item.collectionId))
+          .filter((id) => Number.isInteger(id) && id > 0),
+      ),
+    );
+
+    const enhancedOrderData = {
+      ...orderData,
+      customerId,
+      companyId: null,
+      companyShopifyId: null,
+      companyLocationId: null,
+      shopId: shopRecord?.id,
+      collectionIds,
+      billingAddress: orderData.billingAddress,
+    };
+
+    console.log("SW what is billingAddress", orderData.billingAddress);
+
+    const result = await createOrder(admin, enhancedOrderData);
+
+    if (result.userErrors && result.userErrors.length > 0) {
+      return liquid(`
+        <div class="quick-order-error">
+          <h2>Order Failed</h2>
+          <p>${result.userErrors.map((e) => e.message).join(", ")}</p>
+          <a href="javascript:history.back()">Go Back</a>
+        </div>
+      `);
+    }
+
+    const orderTotal = parseFloat(result.order?.totalPriceSet?.shopMoney?.amount || "0");
+    const itemCount = (orderData.lineItems || []).reduce((sum, item) => sum + item.quantity, 0);
+
+    return liquid(`
+      <div class="quick-order-success">
+        <h2>Order Created Successfully</h2>
+        <p><strong>Order Number:</strong> ${result.order?.name || "N/A"}</p>
+        <p><strong>Items Ordered:</strong> ${itemCount}</p>
+        <p><strong>Total Amount:</strong> $${orderTotal.toFixed(2)} ${result.order?.totalPriceSet?.shopMoney?.currencyCode || "USD"}</p>
+        <a href="javascript:history.back()">Place Another Order</a>
+      </div>
+    `);
+  } catch (error) {
+    return liquid(`
+      <div class="quick-order-error">
+        <h2>Error</h2>
+        <p>Failed to create order: ${error.message}</p>
+        <a href="javascript:history.back()">Go Back</a>
+      </div>
+    `);
+  }
+};
+
+// Show collection products for customer, filtered by selected customer location
 export const loader = async ({ request }) => {
   console.log("SW COLLECTION PROXY HAS RUN");
 
-  const { liquid } = await authenticate.public.appProxy(request);
+  const { liquid, admin } = await authenticate.public.appProxy(request);
 
   const url = new URL(request.url);
   const shop = url.searchParams.get("shop");
@@ -22,106 +105,143 @@ export const loader = async ({ request }) => {
     `);
   }
 
-  const shopRecord = await db.shop.findUnique({
-    where: { shopDomain: shop },
-  });
+  const customer = await getCustomerWithCollectionsAndLocations(shop, customerId);
 
-  if (!shopRecord) {
+  if (!customer) {
     return liquid(`
       <div class="quick-order-error">
-        <h2>Error</h2>
-        <p>Shop not found.</p>
+        <h2>Customer Not Found</h2>
+        <p>No customer record found for this account.</p>
       </div>
     `);
   }
 
-  const company = await getCompanyByCustomer(shop, customerId);
-
-  if (!company) {
-    return liquid(`
-      <div class="quick-order-error">
-        <h2>Company Not Found</h2>
-        <p>No company found for this customer.</p>
-      </div>
-    `);
-  }
-
-  if (!company.locations || company.locations.length === 0) {
+  if (!customer.locations || customer.locations.length === 0) {
     return liquid(`
       <div class="quick-order-error">
         <h2>No Locations Found</h2>
-        <p>No locations found for this company.</p>
+        <p>No locations found for this customer.</p>
       </div>
     `);
   }
 
   const locationData = [];
+  const uniqueCollectionsMap = new Map();
 
-  // Build location -> catalog -> publication products
-  for (const location of company.locations) {
-    if (location.catalogs.length === 0) {
+  for (const assignment of customer.collections || []) {
+    if (assignment?.collection) {
+      uniqueCollectionsMap.set(assignment.collection.id, assignment.collection);
+    }
+  }
+
+  const assignedCollections = Array.from(uniqueCollectionsMap.values()).filter(
+    (collection) => collection.status === "ACTIVE",
+  );
+
+  // Build location -> assigned collections -> collection products
+  for (const location of customer.locations) {
+    const locationCollections = assignedCollections.filter((collection) =>
+      (collection.locations || []).some((entry) => entry.customerLocationId === location.id),
+    );
+
+    if (locationCollections.length === 0) {
       locationData.push({
         locationId: location.id,
         locationName: location.name,
-        locationShopifyId: location.shopifyId,
-        catalogId: null,
-        catalogTitle: null,
-        priceList: null,
+        locationShopifyId: location.id,
+        collectionId: null,
+        collectionTitle: null,
+        collectionDiscount: null,
         products: [],
-        hasNoCatalogs: true,
+        hasNoCollections: true,
+        billingAddress: {
+          address1: location.address1,
+          address2: location.address2,
+          city: location.city,
+          company: location.company,
+          countryCode: location.countryCode,
+          firstName: location.firstName,
+          lastName: location.lastName,
+          phone: location.phone,
+          provinceCode: location.provinceCode,
+          zip: location.zip,
+        },
       });
       continue;
     }
 
-    for (const catalog of location.catalogs) {
-      if (!catalog.publications || catalog.publications.length === 0) {
+    for (const collection of locationCollections) {
+      const collectionProducts = (collection.products || []).map((product) => ({
+        id: product.variantId,
+        title: product.productTitle,
+        originalPrice: Number(product.originalPrice || 0).toFixed(2),
+        adjustedPrice: Number(product.discountedPrice || 0).toFixed(2),
+        hasDiscount: Number(product.discountedPrice || 0) < Number(product.originalPrice || 0),
+        inventory: "N/A",
+      }));
+
+      if (collectionProducts.length === 0) {
         locationData.push({
           locationId: location.id,
           locationName: location.name,
-          locationShopifyId: location.shopifyId,
-          catalogId: catalog.id,
-          catalogTitle: catalog.title,
-          priceList: catalog.priceList,
+          locationShopifyId: location.id,
+          collectionId: collection.id,
+          collectionTitle: collection.title,
+          collectionDiscount: Number(collection.discount || 0),
           products: [],
           hasNoProducts: true,
+          billingAddress: {
+            address1: location.address1,
+            address2: location.address2,
+            city: location.city,
+            company: location.company,
+            countryCode: location.countryCode,
+            firstName: location.firstName,
+            lastName: location.lastName,
+            phone: location.phone,
+            provinceCode: location.provinceCode,
+            zip: location.zip,
+          },
         });
         continue;
-      }
-
-      let allProducts = [];
-      for (const publication of catalog.publications) {
-        const products = await getProductsForPublication(
-          shopRecord.id,
-          publication.id,
-          catalog.priceList,
-        );
-        allProducts = [...allProducts, ...products];
       }
 
       locationData.push({
         locationId: location.id,
         locationName: location.name,
-        locationShopifyId: location.shopifyId,
-        catalogId: catalog.id,
-        catalogTitle: catalog.title,
-        priceList: catalog.priceList,
-        products: allProducts,
-        hasNoProducts: allProducts.length === 0,
+        locationShopifyId: location.id,
+        collectionId: collection.id,
+        collectionTitle: collection.title,
+        collectionDiscount: Number(collection.discount || 0),
+        products: collectionProducts,
+        hasNoProducts: collectionProducts.length === 0,
+        billingAddress: {
+          address1: location.address1,
+          address2: location.address2,
+          city: location.city,
+          company: location.company,
+          countryCode: location.countryCode,
+          firstName: location.firstName,
+          lastName: location.lastName,
+          phone: location.phone,
+          provinceCode: location.provinceCode,
+          zip: location.zip,
+        },
       });
     }
   }
 
-  const defaultLocationShopifyId = company.locations[0]?.shopifyId || "";
-  const locationOptionsHtml = company.locations
+  const defaultLocationShopifyId = customer.locations[0]?.id || "";
+  const locationOptionsHtml = customer.locations
     .map(
       (location) =>
-        `<option value="${location.shopifyId}" ${location.shopifyId === defaultLocationShopifyId ? "selected" : ""}>${location.name}</option>`,
+        `<option value="${location.id}" ${location.id === defaultLocationShopifyId ? "selected" : ""}>${location.name || `Location ${location.id}`}</option>`,
     )
     .join("");
 
   const locationSections = locationData
     .map((locationInfo, locationIndex) => {
-      if (locationInfo.hasNoCatalogs) {
+      if (locationInfo.hasNoCollections) {
         return `
           <div class="location-section" data-location-shopify-id="${locationInfo.locationShopifyId}">
             <div class="location-header">
@@ -130,7 +250,7 @@ export const loader = async ({ request }) => {
             <table class="location-table">
               <thead>
                 <tr>
-                  <th colspan="4" style="text-align: center; color: #666;">No catalogs for ${locationInfo.locationName}</th>
+                  <th colspan="4" style="text-align: center; color: #666;">No collections assigned for ${locationInfo.locationName}</th>
                 </tr>
               </thead>
             </table>
@@ -139,34 +259,21 @@ export const loader = async ({ request }) => {
       }
 
       let adjustmentText = "";
-      const priceList = locationInfo.priceList;
-
-      if (priceList) {
-        const adjustmentValue =
-          typeof priceList.adjustmentValue === "object" && priceList.adjustmentValue.d
-            ? priceList.adjustmentValue.d[0]
-            : parseFloat(priceList.adjustmentValue);
-
-        if (priceList.adjustmentType === "PERCENTAGE_DECREASE") {
-          adjustmentText = `${adjustmentValue}% OFF`;
-        } else if (priceList.adjustmentType === "PERCENTAGE_INCREASE") {
-          adjustmentText = `${adjustmentValue}% Markup`;
-        } else if (priceList.adjustmentType === "FIXED_AMOUNT") {
-          adjustmentText = `$${adjustmentValue} adjustment`;
-        }
+      if (locationInfo.collectionDiscount && locationInfo.collectionDiscount > 0) {
+        adjustmentText = `${locationInfo.collectionDiscount}% OFF`;
       }
 
       if (locationInfo.hasNoProducts) {
         return `
           <div class="location-section" data-location-shopify-id="${locationInfo.locationShopifyId}">
             <div class="location-header">
-              <h3>${locationInfo.locationName} - ${locationInfo.catalogTitle}</h3>
+              <h3>${locationInfo.locationName} - ${locationInfo.collectionTitle}</h3>
               ${adjustmentText ? `<span class="discount-badge">${adjustmentText}</span>` : ""}
             </div>
             <table class="location-table">
               <thead>
                 <tr>
-                  <th colspan="4" style="text-align: center; color: #666;">No products available in this catalog</th>
+                  <th colspan="4" style="text-align: center; color: #666;">No products available in this collection</th>
                 </tr>
               </thead>
             </table>
@@ -198,7 +305,7 @@ export const loader = async ({ request }) => {
       return `
         <div class="location-section" data-location-shopify-id="${locationInfo.locationShopifyId}">
           <div class="location-header">
-            <h3>${locationInfo.locationName} - ${locationInfo.catalogTitle}</h3>
+            <h3>${locationInfo.locationName} - ${locationInfo.collectionTitle}</h3>
             ${adjustmentText ? `<span class="discount-badge">${adjustmentText}</span>` : ""}
           </div>
 
@@ -220,9 +327,38 @@ export const loader = async ({ request }) => {
     })
     .join("");
 
-  const locationWithPriceList = locationData.find((entry) => entry.priceList);
-  const currency = locationWithPriceList?.priceList?.currency || "USD";
+  const currency = "USD";
   const locationDataJson = JSON.stringify(locationData);
+  let orderHistory = [];
+
+  try {
+    orderHistory = await getCustomerOrderHistory(admin, customerId);
+  } catch (error) {
+    console.error("Error fetching order history:", error);
+  }
+
+  const orderHistoryJson = JSON.stringify(orderHistory);
+
+  const orderHistoryRows =
+    orderHistory.length > 0
+      ? orderHistory
+          .map(
+            (order, orderIndex) => `
+      <tr>
+        <td><strong>${order.name}</strong></td>
+        <td>${order.createdAt}</td>
+        <td>${order.items.map((i) => `${i.title} (x${i.quantity})`).join(", ") || "No items"}</td>
+        <td>$${parseFloat(order.total).toFixed(2)} ${order.currency}</td>
+        <td>
+          <button type="button" class="btn-reorder" onclick="reorderItems(${orderIndex})">Re-order</button>
+        </td>
+      </tr>
+    `,
+          )
+          .join("")
+      : `<tr><td colspan="5" style="text-align: center; padding: 20px;">No order history found</td></tr>`;
+
+  const customerDisplayName = `${customer.firstName || ""} ${customer.lastName || ""}`.trim() || customer.email || "Customer";
 
   return liquid(`
     <style>
@@ -268,14 +404,28 @@ export const loader = async ({ request }) => {
       }
       .btn-order:hover { background: #0056b3; }
       .btn-order:disabled { background: #ccc; cursor: not-allowed; }
+      .quick-order-success { padding: 20px; background: #d4edda; border: 1px solid #28a745; border-radius: 4px; margin: 20px 0; }
       .header-info { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; margin-bottom: 20px; }
       .header-info h1 { margin: 0; }
       .locations-container { margin-top: 20px; }
+      .order-history { margin-top: 40px; padding-top: 30px; border-top: 2px solid #eee; }
+      .order-history h2 { margin: 0 0 15px 0; color: #333; }
+      .order-history table { font-size: 0.95em; width: 100%; border-collapse: collapse; }
+      .btn-reorder {
+        background: #28a745;
+        color: #fff;
+        border: none;
+        padding: 8px 16px;
+        border-radius: 6px;
+        font-size: 0.9em;
+        cursor: pointer;
+      }
+      .btn-reorder:hover { background: #1f8a39; }
     </style>
 
     <div class="quick-order-container">
       <div class="header-info">
-        <h1>Catalog Products - ${company.name}</h1>
+        <h1>Catalog Products - ${customerDisplayName}</h1>
       </div>
       <p>Shop: {{shop.name}} | Currency: ${currency}</p>
 
@@ -286,7 +436,9 @@ export const loader = async ({ request }) => {
         </select>
       </div>
 
-      <form id="catalogProductForm" method="POST">
+      <form id="quickOrderForm" method="POST">
+        <input type="hidden" name="orderData" id="orderDataInput" />
+
         <div class="locations-container">
           ${locationSections}
         </div>
@@ -295,23 +447,45 @@ export const loader = async ({ request }) => {
           <h3>Selection Summary</h3>
           <p>Items: <span id="totalItems">0</span></p>
           <p class="order-total">Total: $<span id="orderTotal">0.00</span> ${currency}</p>
-          <button type="button" class="btn-order" id="addToCartBtn" disabled onclick="addSelectedToCart()">Add to Cart</button>
+          <button type="submit" class="btn-order" id="orderBtn" disabled>Order Now</button>
         </div>
       </form>
+
+      <div class="order-history">
+        <h2>Your Order History</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Order</th>
+              <th>Date</th>
+              <th>Items</th>
+              <th>Total</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${orderHistoryRows}
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <script>
       (function() {
         const locationData = ${locationDataJson};
+        const orderHistory = ${orderHistoryJson};
         const currency = "${currency}";
+        const form = document.getElementById('quickOrderForm');
+        const orderDataInput = document.getElementById('orderDataInput');
         const locationFilter = document.getElementById('locationFilter');
         const totalItemsEl = document.getElementById('totalItems');
         const orderTotalEl = document.getElementById('orderTotal');
-        const addToCartBtn = document.getElementById('addToCartBtn');
+        const orderBtn = document.getElementById('orderBtn');
 
         function updateOrderSummary() {
           let totalItems = 0;
           let totalAmount = 0;
+          const lineItems = [];
 
           document.querySelectorAll('.qty-input').forEach((input) => {
             if (input.disabled) {
@@ -323,22 +497,40 @@ export const loader = async ({ request }) => {
             const productIndex = parseInt(input.dataset.productIndex);
 
             if (qty > 0 && locationData[locationIndex] && locationData[locationIndex].products && locationData[locationIndex].products[productIndex]) {
+              const location = locationData[locationIndex];
               const product = locationData[locationIndex].products[productIndex];
               totalItems += qty;
               totalAmount += parseFloat(product.adjustedPrice) * qty;
+              lineItems.push({
+                title: product.title,
+                price: product.adjustedPrice,
+                quantity: qty,
+                locationName: location.locationName,
+                locationShopifyId: location.locationShopifyId,
+                collectionId: location.collectionId,
+                collectionTitle: location.collectionTitle,
+              });
             }
           });
 
           totalItemsEl.textContent = totalItems;
           orderTotalEl.textContent = totalAmount.toFixed(2);
-          addToCartBtn.disabled = totalItems === 0;
+          orderBtn.disabled = totalItems === 0;
+
+          const billingAddress = getSelectedLocationBillingAddress();
+
+          orderDataInput.value = JSON.stringify({
+            currency: currency,
+            lineItems: lineItems,
+            billingAddress: billingAddress,
+          });
         }
 
         function applyLocationFilter() {
-          const selectedLocationShopifyId = locationFilter ? locationFilter.value : '';
+          const selectedLocationShopifyId = locationFilter ? locationFilter.value : String(locationData[0]?.locationShopifyId || '');
 
           document.querySelectorAll('.location-section').forEach((section) => {
-            const isVisible = section.dataset.locationShopifyId === selectedLocationShopifyId;
+            const isVisible = String(section.dataset.locationShopifyId) === selectedLocationShopifyId;
             section.style.display = isVisible ? 'block' : 'none';
 
             section.querySelectorAll('.qty-input').forEach((input) => {
@@ -358,55 +550,87 @@ export const loader = async ({ request }) => {
           }
         });
 
+        function getSelectedLocationBillingAddress() {
+          const selectedLocationShopifyId = locationFilter ? locationFilter.value : String(locationData[0]?.locationShopifyId || '');
+          const selectedLocation = locationData.find(loc => String(loc.locationShopifyId) === selectedLocationShopifyId);
+          return selectedLocation?.billingAddress || null;
+        }
+
         if (locationFilter) {
           locationFilter.addEventListener('change', applyLocationFilter);
         }
 
-        window.addSelectedToCart = function() {
-          const selectedItems = [];
-
-          document.querySelectorAll('.qty-input').forEach((input) => {
-            if (input.disabled) {
-              return;
-            }
-
-            const qty = parseInt(input.value) || 0;
-            const locationIndex = parseInt(input.dataset.locationIndex);
-            const productIndex = parseInt(input.dataset.productIndex);
-
-            if (qty > 0 && locationData[locationIndex] && locationData[locationIndex].products && locationData[locationIndex].products[productIndex]) {
-              const location = locationData[locationIndex];
-              const product = location.products[productIndex];
-
-              selectedItems.push({
-                locationName: location.locationName,
-                catalogTitle: location.catalogTitle,
-                productTitle: product.title,
-                quantity: qty,
-                unitPrice: parseFloat(product.adjustedPrice),
-                totalPrice: parseFloat(product.adjustedPrice) * qty,
-              });
-            }
-          });
-
-          if (selectedItems.length === 0) {
-            alert('Please select at least one item with quantity greater than 0.');
+        window.reorderItems = function(orderIndex) {
+          const order = orderHistory[orderIndex];
+          if (!order || !order.items) {
+            alert('Unable to re-order: Order data not found');
             return;
           }
 
-          const totalItems = selectedItems.reduce((sum, item) => sum + item.quantity, 0);
-          const totalAmount = selectedItems.reduce((sum, item) => sum + item.totalPrice, 0);
+          const lineItems = [];
+          let selectedLocationData = null;
 
-          console.log('Catalog items selected:', selectedItems);
-          alert('Added ' + totalItems + ' item(s) to cart. Total: $' + totalAmount.toFixed(2) + ' ' + currency);
+          order.items.forEach((orderItem) => {
+            let matched = false;
 
-          document.querySelectorAll('.qty-input').forEach((input) => {
-            if (!input.disabled) {
-              input.value = '0';
-            }
+            locationData.forEach((location) => {
+              if (!matched && location.products) {
+                location.products.forEach((product) => {
+                  if (!matched && product.title.toLowerCase() === orderItem.title.toLowerCase()) {
+                    if (!selectedLocationData) {
+                      selectedLocationData = location;
+                    }
+                    lineItems.push({
+                      title: product.title,
+                      price: product.adjustedPrice,
+                      quantity: orderItem.quantity,
+                      locationName: location.locationName,
+                      locationShopifyId: location.locationShopifyId,
+                      collectionId: location.collectionId,
+                      collectionTitle: location.collectionTitle,
+                    });
+                    matched = true;
+                  }
+                });
+              }
+            });
           });
-          updateOrderSummary();
+
+          if (lineItems.length === 0) {
+            alert('Unable to re-order: no matching items in current collections');
+            return;
+          }
+
+          const payload = {
+            currency: currency,
+            lineItems,
+            billingAddress: selectedLocationData?.billingAddress || null,
+          };
+
+          const submitData = new FormData();
+          submitData.append('orderData', JSON.stringify(payload));
+
+          fetch(window.location.href, {
+            method: 'POST',
+            body: submitData,
+          })
+            .then((response) => response.text())
+            .then((html) => {
+              document.documentElement.innerHTML = html;
+            })
+            .catch(() => {
+              alert('Failed to create re-order. Please try again.');
+            });
         };
+
+        form.addEventListener('submit', function(e) {
+          if (orderBtn.disabled) {
+            e.preventDefault();
+            return;
+          }
+          orderBtn.textContent = 'Processing...';
+          orderBtn.disabled = true;
+        });
 
         applyLocationFilter();
       })();

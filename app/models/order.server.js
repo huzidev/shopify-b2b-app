@@ -11,12 +11,15 @@ export async function createOrder(admin, orderData) {
     shopId,
     collectionId,
     collectionIds,
+    billingAddress,
   } = orderData;
 
   // Calculate total amount from line items
   const totalAmount = lineItems.reduce((sum, item) => {
     return sum + (parseFloat(item.price) * item.quantity);
   }, 0);
+
+  console.log("SW what is billingAddress", billingAddress);
 
   const variables = {
     order: {
@@ -50,6 +53,22 @@ export async function createOrder(admin, orderData) {
   // Add companyLocationId if available
   if (companyLocationId) {
     variables.order.companyLocationId = companyLocationId;
+  }
+
+  // Add billing address if available, filtering out null/undefined values
+  if (billingAddress && typeof billingAddress === 'object') {
+    const cleanedBillingAddress = {};
+    const addressFields = ['address1', 'address2', 'city', 'company', 'countryCode', 'firstName', 'lastName', 'phone', 'provinceCode', 'zip'];
+    
+    for (const field of addressFields) {
+      if (billingAddress[field]) {
+        cleanedBillingAddress[field] = billingAddress[field];
+      }
+    }
+    
+    if (Object.keys(cleanedBillingAddress).length > 0) {
+      variables.order.billingAddress = cleanedBillingAddress;
+    }
   }
 
   // Remove customerId if not provided to avoid GraphQL errors

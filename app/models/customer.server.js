@@ -347,6 +347,51 @@ export async function getCustomerById(shop, customerId) {
   }
 }
 
+export async function getCustomerWithCollectionsAndLocations(shop, customerId) {
+  try {
+    const dbShop = await getShopRecord(shop);
+    if (!dbShop) {
+      return null;
+    }
+
+    const customer = await db.customer.findFirst({
+      where: {
+        shopId: dbShop.id,
+        OR: [
+          { shopifyNumericId: String(customerId) },
+          { shopifyCustomerId: `gid://shopify/Customer/${customerId}` },
+        ],
+      },
+      include: {
+        locations: {
+          orderBy: {
+            createdAt: "desc",
+          },
+        },
+        collections: {
+          include: {
+            collection: {
+              include: {
+                products: true,
+                locations: {
+                  include: {
+                    customerLocation: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    return customer;
+  } catch (error) {
+    console.error("Error fetching customer with locations and collections:", error);
+    return null;
+  }
+}
+
 export async function getCustomerLocations(customerId) {
   try {
     const locations = await db.customerLocation.findMany({
