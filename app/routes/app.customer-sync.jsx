@@ -23,7 +23,7 @@ import {
   Icon,
 } from "@shopify/polaris";
 import { useAppBridge } from "@shopify/app-bridge-react";
-import { EyeIcon, EditIcon, DeleteIcon } from "@shopify/polaris-icons";
+import { ViewIcon, EditIcon, DeleteIcon } from "@shopify/polaris-icons";
 
 export const loader = async ({ request }) => {
   const { admin, session } = await authenticate.admin(request);
@@ -271,7 +271,7 @@ export default function AppCustomerSync() {
       <IndexTable.Cell>
         <InlineStack gap="200">
           <Button
-            icon={EyeIcon}
+            icon={ViewIcon}
             variant="plain"
             size="slim"
             onClick={() => handleViewCustomer(customer.id, customer.numericId)}
