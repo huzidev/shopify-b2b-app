@@ -304,6 +304,13 @@ export async function searchSyncedCustomers(shop, searchTerm, limit = 20) {
     const customers = await db.customer.findMany({
       where,
       take: limit,
+      include: {
+        locations: {
+          orderBy: {
+            createdAt: "desc",
+          },
+        },
+      },
       orderBy: {
         updatedAt: "desc",
       },

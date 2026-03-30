@@ -77,6 +77,7 @@ export const action = async ({ request }) => {
       const description = formData.get("description") || "";
       const selectedProductsData = formData.get("selectedProducts");
       const selectedCustomersData = formData.get("selectedCustomers");
+      const selectedCustomerLocationsData = formData.get("selectedCustomerLocations");
       
       if (!title) {
         return {
@@ -132,6 +133,25 @@ export const action = async ({ request }) => {
         };
       }
 
+      let selectedCustomerLocations = [];
+      if (selectedCustomerLocationsData) {
+        try {
+          selectedCustomerLocations = JSON.parse(selectedCustomerLocationsData);
+        } catch (e) {
+          return {
+            success: false,
+            error: "Invalid customer location data format"
+          };
+        }
+      }
+
+      if (selectedCustomerLocations.length === 0) {
+        return {
+          success: false,
+          error: "Please select at least one customer location for this collection"
+        };
+      }
+
       const discount = parseFloat(formData.get("discount")) || 0;
       
       // Create the collection
@@ -140,6 +160,7 @@ export const action = async ({ request }) => {
         description,
         products: selectedProducts,
         customers: selectedCustomers,
+        customerLocations: selectedCustomerLocations,
         discount
       });
 
@@ -175,6 +196,7 @@ export default function AppCreateCollection() {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [selectedCustomers, setSelectedCustomers] = useState([]);
+  const [selectedLocationIds, setSelectedLocationIds] = useState([]);
   const [selectedProducts, setSelectedProducts] = useState([]);
   const [discountPercentage, setDiscountPercentage] = useState(0);
   
@@ -291,6 +313,11 @@ export default function AppCreateCollection() {
       return;
     }
 
+    if (selectedLocationIds.length === 0) {
+      shopify.toast.show("Please select at least one customer location", { isError: true });
+      return;
+    }
+
     if (selectedProducts.length === 0) {
       shopify.toast.show("Please select at least one product", { isError: true });
       return;
@@ -302,10 +329,34 @@ export default function AppCreateCollection() {
     formData.append("description", description);
     formData.append("discount", discountPercentage.toString());
     formData.append("selectedCustomers", JSON.stringify(selectedCustomers));
+    formData.append(
+      "selectedCustomerLocations",
+      JSON.stringify(
+        selectedLocationIds.map((locationId) => {
+          const owner = selectedCustomers.find((customer) =>
+            (customer.locations || []).some((location) => location.id === locationId),
+          );
+
+          return {
+            customerId: owner?.id,
+            locationId,
+          };
+        }),
+      ),
+    );
     formData.append("selectedProducts", JSON.stringify(selectedProducts));
 
     createFetcher.submit(formData, { method: "POST" });
-  }, [title, description, discountPercentage, selectedCustomers, selectedProducts, createFetcher, shopify]);
+  }, [
+    title,
+    description,
+    discountPercentage,
+    selectedCustomers,
+    selectedLocationIds,
+    selectedProducts,
+    createFetcher,
+    shopify,
+  ]);
 
   // Apply percentage discount to all products
   const applyPercentageDiscount = useCallback((percentage) => {
@@ -343,6 +394,10 @@ export default function AppCreateCollection() {
         shopify.toast.show("Please assign at least one customer", { isError: true });
         return;
       }
+      if (selectedLocationIds.length === 0) {
+        shopify.toast.show("Please select at least one customer location", { isError: true });
+        return;
+      }
       setCurrentStep(3);
     } else if (currentStep === 3) {
       if (selectedProducts.length === 0) {
@@ -351,7 +406,7 @@ export default function AppCreateCollection() {
       }
       setCurrentStep(4);
     }
-  }, [currentStep, title, selectedCustomers.length, selectedProducts.length, shopify]);
+  }, [currentStep, title, selectedCustomers.length, selectedLocationIds.length, selectedProducts.length, shopify]);
 
   const handlePrevious = useCallback(() => {
     if (currentStep > 1) {
@@ -374,13 +429,50 @@ export default function AppCreateCollection() {
           firstName: customer.firstName,
           lastName: customer.lastName,
           email: customer.email,
+          locations: customer.locations || [],
         },
       ];
     });
+
+    // Default to selecting all known locations for a newly added customer.
+    if (customer.locations?.length) {
+      setSelectedLocationIds((prev) => {
+        const next = new Set(prev);
+        customer.locations.forEach((location) => {
+          if (location?.id) {
+            next.add(location.id);
+          }
+        });
+        return Array.from(next);
+      });
+    }
   }, []);
 
   const handleRemoveCustomer = useCallback((customerId) => {
-    setSelectedCustomers((prev) => prev.filter((customer) => customer.id !== customerId));
+    setSelectedCustomers((prev) => {
+      const customerToRemove = prev.find((customer) => customer.id === customerId);
+      const remainingCustomers = prev.filter((customer) => customer.id !== customerId);
+
+      if (customerToRemove?.locations?.length) {
+        const removedIds = new Set(customerToRemove.locations.map((location) => location.id));
+        setSelectedLocationIds((current) => current.filter((id) => !removedIds.has(id)));
+      }
+
+      return remainingCustomers;
+    });
+  }, []);
+
+  const handleLocationToggle = useCallback((locationId, checked) => {
+    setSelectedLocationIds((prev) => {
+      if (checked) {
+        if (prev.includes(locationId)) {
+          return prev;
+        }
+        return [...prev, locationId];
+      }
+
+      return prev.filter((id) => id !== locationId);
+    });
   }, []);
 
   // Progress calculation
@@ -397,6 +489,18 @@ export default function AppCreateCollection() {
   const formatCustomerName = (customer) => {
     const fullName = `${customer.firstName || ""} ${customer.lastName || ""}`.trim();
     return fullName || "No name";
+  };
+
+  const formatLocationLabel = (location) => {
+    const parts = [
+      location?.name,
+      location?.address1,
+      location?.city,
+      location?.province,
+      location?.zip,
+    ].filter(Boolean);
+
+    return parts.join(" - ") || `Location #${location?.id}`;
   };
 
   return (
@@ -458,7 +562,7 @@ export default function AppCreateCollection() {
                   <BlockStack gap="100">
                     <Text variant="headingLg" as="h3">Assign Customers</Text>
                     <Text color="subdued">
-                      Search synced customers by email, Shopify customer ID, or name and assign them to this collection.
+                      Search synced customers, add them, then choose the specific customer locations for this collection.
                     </Text>
                   </BlockStack>
 
@@ -479,9 +583,51 @@ export default function AppCreateCollection() {
                   {selectedCustomers.length > 0 && (
                     <Banner tone="info">
                       <Text>
-                        {selectedCustomers.length} customer{selectedCustomers.length !== 1 ? 's' : ''} assigned
+                        {selectedCustomers.length} customer{selectedCustomers.length !== 1 ? 's' : ''} assigned, {selectedLocationIds.length} location{selectedLocationIds.length !== 1 ? 's' : ''} selected
                       </Text>
                     </Banner>
+                  )}
+
+                  {selectedCustomers.length > 0 && (
+                    <Card>
+                      <BlockStack gap="300">
+                        <Text variant="headingMd" as="h4">Selected Customers and Locations</Text>
+                        {selectedCustomers.map((customer) => (
+                          <BlockStack key={`selected-customer-${customer.id}`} gap="200">
+                            <InlineStack align="space-between" blockAlign="center">
+                              <BlockStack gap="050">
+                                <Text fontWeight="semibold">{formatCustomerName(customer)}</Text>
+                                <Text color="subdued">{customer.email || "No email"}</Text>
+                              </BlockStack>
+                              <Button
+                                tone="critical"
+                                size="slim"
+                                onClick={() => handleRemoveCustomer(customer.id)}
+                              >
+                                Remove Customer
+                              </Button>
+                            </InlineStack>
+
+                            {customer.locations?.length ? (
+                              <BlockStack gap="100">
+                                {customer.locations.map((location) => (
+                                  <Checkbox
+                                    key={`location-${customer.id}-${location.id}`}
+                                    label={formatLocationLabel(location)}
+                                    checked={selectedLocationIds.includes(location.id)}
+                                    onChange={(checked) => handleLocationToggle(location.id, checked)}
+                                  />
+                                ))}
+                              </BlockStack>
+                            ) : (
+                              <Text color="subdued">No locations found for this customer.</Text>
+                            )}
+
+                            <Divider />
+                          </BlockStack>
+                        ))}
+                      </BlockStack>
+                    </Card>
                   )}
 
                   {customerResults.length === 0 ? (
@@ -655,7 +801,7 @@ export default function AppCreateCollection() {
                       variant="primary"
                       disabled={
                         (currentStep === 1 && !title.trim()) ||
-                        (currentStep === 2 && selectedCustomers.length === 0) ||
+                        (currentStep === 2 && (selectedCustomers.length === 0 || selectedLocationIds.length === 0)) ||
                         (currentStep === 3 && selectedProducts.length === 0)
                       }
                     >
@@ -666,7 +812,7 @@ export default function AppCreateCollection() {
                       onClick={handleSubmit}
                       variant="primary"
                       loading={isLoading}
-                      disabled={isLoading || !title || selectedCustomers.length === 0 || selectedProducts.length === 0}
+                      disabled={isLoading || !title || selectedCustomers.length === 0 || selectedLocationIds.length === 0 || selectedProducts.length === 0}
                     >
                       Create Collection
                     </Button>

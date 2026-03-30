@@ -263,6 +263,7 @@ model Collection {
   updatedAt   DateTime             @updatedAt
   discount    Decimal              @default(0) @db.Decimal(5, 2)
   customers   CollectionCustomer[]
+  locations   CollectionCustomerLocation[]
   products    CollectionProduct[]
   shop        Shop                 @relation(fields: [shopId], references: [id], onDelete: Cascade)
   orders      OrderCollection[]
@@ -329,9 +330,25 @@ model CustomerLocation {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
   customer         Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  collections      CollectionCustomerLocation[]
 
   @@index([customerId])
   @@map("customer_locations")
+}
+
+model CollectionCustomerLocation {
+  id                 Int              @id @default(autoincrement())
+  collectionId       Int
+  customerLocationId Int
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  collection         Collection       @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  customerLocation   CustomerLocation @relation(fields: [customerLocationId], references: [id], onDelete: Cascade)
+
+  @@unique([collectionId, customerLocationId])
+  @@index([collectionId])
+  @@index([customerLocationId])
+  @@map("collection_customer_locations")
 }
 
 model CollectionCustomer {

@@ -1,10 +1,12 @@
 import db from "../db.server";
 
-// Create a new collection with discounted products and assigned customers
-export async function createCollection(shop, { title, description, products, discount = 0, customers = [] }) {
+// Create a new collection with discounted products, assigned customers, and customer locations
+export async function createCollection(
+  shop,
+  { title, description, products, discount = 0, customers = [], customerLocations = [] },
+) {
   try {
     console.log("Sw what is shop for find and create collection", shop);
-    
 
     const shopRecord = await db.shop.findUnique({
       where: { shopDomain: shop },
@@ -78,14 +80,36 @@ export async function createCollection(shop, { title, description, products, dis
       }
     }
 
+    // Attach selected customer locations to the collection
+    if (customerLocations && customerLocations.length > 0) {
+      const collectionLocations = customerLocations
+        .filter((entry) => entry?.locationId)
+        .map((entry) => ({
+          collectionId: collection.id,
+          customerLocationId: Number(entry.locationId),
+        }));
+
+      if (collectionLocations.length > 0) {
+        await db.collectionCustomerLocation.createMany({
+          data: collectionLocations,
+          skipDuplicates: true,
+        });
+      }
+    }
+
     // Return the created collection with its products
     const createdCollection = await db.collection.findUnique({
       where: { id: collection.id },
       include: {
         products: true,
         customers: true,
+        locations: {
+          include: {
+            customerLocation: true,
+          },
+        },
         _count: {
-          select: { products: true, customers: true }
+          select: { products: true, customers: true, locations: true }
         }
       },
     });
