@@ -315,3 +315,197 @@ export async function searchSyncedCustomers(shop, searchTerm, limit = 20) {
     return [];
   }
 }
+
+export async function getCustomerById(shop, customerId) {
+  try {
+    const dbShop = await getShopRecord(shop);
+    if (!dbShop) {
+      return null;
+    }
+
+    const customer = await db.customer.findFirst({
+      where: {
+        id: parseInt(customerId),
+        shopId: dbShop.id,
+      },
+      include: {
+        locations: true,
+      },
+    });
+
+    return customer;
+  } catch (error) {
+    console.error("Error fetching customer:", error);
+    return null;
+  }
+}
+
+export async function getCustomerLocations(customerId) {
+  try {
+    const locations = await db.customerLocation.findMany({
+      where: { customerId: parseInt(customerId) },
+      orderBy: { createdAt: "desc" },
+    });
+
+    return locations;
+  } catch (error) {
+    console.error("Error fetching customer locations:", error);
+    return [];
+  }
+}
+
+export async function createCustomerLocation(customerId, locationData) {
+  try {
+    const location = await db.customerLocation.create({
+      data: {
+        customerId: parseInt(customerId),
+        firstName: locationData.firstName || null,
+        lastName: locationData.lastName || null,
+        company: locationData.company || null,
+        address1: locationData.address1 || null,
+        address2: locationData.address2 || null,
+        city: locationData.city || null,
+        province: locationData.province || null,
+        country: locationData.country || null,
+        zip: locationData.zip || null,
+        phone: locationData.phone || null,
+        name: locationData.name || null,
+        provinceCode: locationData.provinceCode || null,
+        countryCode: locationData.countryCode || null,
+        countryName: locationData.countryName || null,
+      },
+    });
+
+    return { success: true, location };
+  } catch (error) {
+    console.error("Error creating customer location:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+export async function updateCustomerLocation(locationId, locationData) {
+  try {
+    const location = await db.customerLocation.update({
+      where: { id: parseInt(locationId) },
+      data: {
+        firstName: locationData.firstName || null,
+        lastName: locationData.lastName || null,
+        company: locationData.company || null,
+        address1: locationData.address1 || null,
+        address2: locationData.address2 || null,
+        city: locationData.city || null,
+        province: locationData.province || null,
+        country: locationData.country || null,
+        zip: locationData.zip || null,
+        phone: locationData.phone || null,
+        name: locationData.name || null,
+        provinceCode: locationData.provinceCode || null,
+        countryCode: locationData.countryCode || null,
+        countryName: locationData.countryName || null,
+      },
+    });
+
+    return { success: true, location };
+  } catch (error) {
+    console.error("Error updating customer location:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+export async function deleteCustomerLocation(locationId) {
+  try {
+    await db.customerLocation.delete({
+      where: { id: parseInt(locationId) },
+    });
+
+    return { success: true };
+  } catch (error) {
+    console.error("Error deleting customer location:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+export async function updateCustomerMetafields(admin, customerId, metafields) {
+  try {
+    const customerGid = `gid://shopify/Customer/${customerId}`;
+
+    const response = await admin.graphql(
+      `#graphql
+      mutation updateCustomerMetafields($input: CustomerInput!) {
+        customerUpdate(input: $input) {
+          customer {
+            id
+            firstName
+            lastName
+            email
+            metafields(first: 10) {
+              edges {
+                node {
+                  id
+                  namespace
+                  key
+                  value
+                }
+              }
+            }
+          }
+          userErrors {
+            message
+            field
+          }
+        }
+      }`,
+      {
+        variables: {
+          input: {
+            id: customerGid,
+            metafields: metafields,
+          },
+        },
+      },
+    );
+
+    const json = await response.json();
+    const result = json?.data?.customerUpdate;
+
+    if (result?.userErrors?.length > 0) {
+      return { success: false, error: result.userErrors[0].message };
+    }
+
+    return { success: true, customer: result?.customer };
+  } catch (error) {
+    console.error("Error updating customer metafields:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+export async function getCustomerOrders(shop, customerId) {
+  try {
+    const orders = await db.order.findMany({
+      where: {
+        shop: {
+          shopDomain: shop,
+        },
+      },
+      include: {
+        orderItems: {
+          include: {
+            variant: {
+              include: {
+                product: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
+
+    return orders;
+  } catch (error) {
+    console.error("Error fetching customer orders:", error);
+    return [];
+  }
+}

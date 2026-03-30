@@ -20,8 +20,10 @@ import {
   Page,
   Text,
   TextField,
+  Icon,
 } from "@shopify/polaris";
 import { useAppBridge } from "@shopify/app-bridge-react";
+import { EyeIcon, EditIcon, DeleteIcon } from "@shopify/polaris-icons";
 
 export const loader = async ({ request }) => {
   const { admin, session } = await authenticate.admin(request);
@@ -31,9 +33,15 @@ export const loader = async ({ request }) => {
     getCustomersWithSyncStatus(admin, session.shop),
   ]);
 
+  // Fetch location counts for each customer
+  const customersWithLocations = customersWithStatus.map(customer => {
+    // Will be fetched on client if needed
+    return customer;
+  });
+
   return {
     stats,
-    customersWithStatus,
+    customersWithStatus: customersWithLocations,
   };
 };
 
@@ -72,6 +80,52 @@ export const action = async ({ request }) => {
       return {
         success: true,
         message: "Customer created successfully",
+        updatedStats,
+        updatedCustomersWithStatus,
+      };
+    }
+
+    if (actionType === "deleteCustomer") {
+      const shopifyCustomerId = (formData.get("shopifyCustomerId") || "").toString().trim();
+      
+      if (!shopifyCustomerId) {
+        return { success: false, error: "Customer ID is required" };
+      }
+
+      // Delete from Shopify
+      const deleteResponse = await admin.graphql(
+        `#graphql
+        mutation deleteCustomer($id: ID!) {
+          customerDelete(input: {id: $id}) {
+            userErrors {
+              field
+              message
+            }
+            deletedCustomerIds
+          }
+        }`,
+        {
+          variables: {
+            id: shopifyCustomerId,
+          },
+        },
+      );
+
+      const json = await deleteResponse.json();
+      const result = json?.data?.customerDelete;
+
+      if (result?.userErrors?.length > 0) {
+        return { success: false, error: result.userErrors[0].message };
+      }
+
+      const [updatedStats, updatedCustomersWithStatus] = await Promise.all([
+        getCustomerStats(session.shop),
+        getCustomersWithSyncStatus(admin, session.shop),
+      ]);
+
+      return {
+        success: true,
+        message: "Customer deleted successfully",
         updatedStats,
         updatedCustomersWithStatus,
       };
@@ -119,6 +173,10 @@ export default function AppCustomerSync() {
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
 
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [customerToDelete, setCustomerToDelete] = useState(null);
+  const [customerLocations, setCustomerLocations] = useState({});
+
   useEffect(() => {
     if (fetcher.data?.success) {
       shopify.toast.show(fetcher.data.message || "Operation completed successfully");
@@ -162,6 +220,34 @@ export default function AppCustomerSync() {
     );
   };
 
+  const handleViewCustomer = (customerId, numericId) => {
+    navigate(`/app/customer/${numericId}`);
+  };
+
+  const handleEditCustomer = (customerId, numericId) => {
+    navigate(`/app/edit-customer/${numericId}`);
+  };
+
+  const handleDeleteCustomer = (customer) => {
+    setCustomerToDelete(customer);
+    setDeleteConfirmOpen(true);
+  };
+
+  const handleConfirmDelete = () => {
+    if (customerToDelete) {
+      fetcher.submit(
+        {
+          actionType: "deleteCustomer",
+          customerId: customerToDelete.id,
+          shopifyCustomerId: customerToDelete.shopifyCustomerId,
+        },
+        { method: "POST" },
+      );
+      setDeleteConfirmOpen(false);
+      setCustomerToDelete(null);
+    }
+  };
+
   const rows = (currentCustomers || []).map((customer, index) => (
     <IndexTable.Row id={customer.id} key={customer.id} position={index}>
       <IndexTable.Cell>
@@ -176,6 +262,37 @@ export default function AppCustomerSync() {
         <Badge tone={customer.syncStatus === "SYNCED" ? "success" : "warning"}>
           {customer.syncStatus === "SYNCED" ? "Synced" : "Not Synced"}
         </Badge>
+      </IndexTable.Cell>
+      <IndexTable.Cell>
+        <Text variant="bodyMd" as="span">
+          {customerLocations[customer.id] || 0}
+        </Text>
+      </IndexTable.Cell>
+      <IndexTable.Cell>
+        <InlineStack gap="200">
+          <Button
+            icon={EyeIcon}
+            variant="plain"
+            size="slim"
+            onClick={() => handleViewCustomer(customer.id, customer.numericId)}
+            accessibilityLabel="View customer"
+          />
+          <Button
+            icon={EditIcon}
+            variant="plain"
+            size="slim"
+            onClick={() => handleEditCustomer(customer.id, customer.numericId)}
+            accessibilityLabel="Edit customer"
+          />
+          <Button
+            icon={DeleteIcon}
+            variant="plain"
+            size="slim"
+            onClick={() => handleDeleteCustomer(customer)}
+            accessibilityLabel="Delete customer"
+            tone="critical"
+          />
+        </InlineStack>
       </IndexTable.Cell>
     </IndexTable.Row>
   ));
@@ -239,6 +356,8 @@ export default function AppCustomerSync() {
                   { title: "Shopify ID" },
                   { title: "State" },
                   { title: "Sync Status" },
+                  { title: "Locations" },
+                  { title: "Actions" },
                 ]}
               >
                 {rows}
@@ -275,6 +394,33 @@ export default function AppCustomerSync() {
             <TextField label="Last Name" value={lastName} onChange={setLastName} autoComplete="off" />
             <TextField label="Email" type="email" value={email} onChange={setEmail} autoComplete="off" />
             <TextField label="Phone" value={phone} onChange={setPhone} autoComplete="off" />
+          </BlockStack>
+        </Modal.Section>
+      </Modal>
+
+      <Modal
+        open={deleteConfirmOpen}
+        onClose={() => setDeleteConfirmOpen(false)}
+        title="Delete Customer"
+        primaryAction={{
+          content: "Delete",
+          onAction: handleConfirmDelete,
+          tone: "critical",
+        }}
+        secondaryActions={[
+          {
+            content: "Cancel",
+            onAction: () => setDeleteConfirmOpen(false),
+          },
+        ]}
+      >
+        <Modal.Section>
+          <BlockStack gap="300">
+            <Banner tone="warning">
+              <Text as="p">
+                Are you sure you want to delete customer <strong>{customerToDelete?.firstName} {customerToDelete?.lastName}</strong>? This action cannot be undone.
+              </Text>
+            </Banner>
           </BlockStack>
         </Modal.Section>
       </Modal>

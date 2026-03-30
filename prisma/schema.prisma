@@ -299,6 +299,7 @@ model Customer {
   createdAt         DateTime             @default(now())
   updatedAt         DateTime             @updatedAt
   collections       CollectionCustomer[]
+  locations         CustomerLocation[]
   shop              Shop                 @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@unique([shopifyCustomerId, shopId])
@@ -306,6 +307,31 @@ model Customer {
   @@index([shopifyNumericId])
   @@index([email])
   @@map("customers")
+}
+
+model CustomerLocation {
+  id               Int      @id @default(autoincrement())
+  customerId       Int
+  firstName        String?
+  lastName         String?
+  company          String?
+  address1         String?
+  address2         String?
+  city             String?
+  province         String?
+  country          String?
+  zip              String?
+  phone            String?
+  name             String?
+  provinceCode     String?
+  countryCode      String?
+  countryName      String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  customer         Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+  @@map("customer_locations")
 }
 
 model CollectionCustomer {

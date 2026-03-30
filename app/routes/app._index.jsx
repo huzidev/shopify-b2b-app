@@ -165,7 +165,7 @@ export default function Dashboard() {
                     clearButton
                     onClearButtonClick={() => setSearchValue("")}
                   />
-                </div>
+                </div>      
                 <div style={{ width: 160 }}>
                   <Select
                     options={filterOptions}
