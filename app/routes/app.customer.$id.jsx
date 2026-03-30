@@ -16,10 +16,28 @@ import {
   DataTable,
   Link,
   Modal,
-  TextField,
-  Grid,
+  ButtonGroup,
 } from "@shopify/polaris";
+import { EditIcon, DeleteIcon } from "@shopify/polaris-icons";
 import { useAppBridge } from "@shopify/app-bridge-react";
+import LocationModal from "../components/LocationModal";
+
+const EMPTY_LOCATION_FORM = {
+  firstName: "",
+  lastName: "",
+  company: "",
+  address1: "",
+  address2: "",
+  city: "",
+  province: "",
+  country: "",
+  zip: "",
+  phone: "",
+  name: "",
+  provinceCode: "",
+  countryCode: "",
+  countryName: "",
+};
 
 export const loader = async ({ request, params }) => {
   const { session } = await authenticate.admin(request);
@@ -159,6 +177,86 @@ export const action = async ({ request, params }) => {
       };
     }
 
+    if (actionType === "updateLocation") {
+      const locationId = Number(formData.get("locationId"));
+
+      const existingLocation = await db.customerLocation.findFirst({
+        where: {
+          id: locationId,
+          customerId: customer.id,
+        },
+      });
+
+      if (!existingLocation) {
+        return { success: false, error: "Location not found" };
+      }
+
+      const firstName = (formData.get("firstName") || "").toString().trim();
+      const lastName = (formData.get("lastName") || "").toString().trim();
+      const companyName = (formData.get("company") || "").toString().trim();
+      const address1 = (formData.get("address1") || "").toString().trim();
+      const address2 = (formData.get("address2") || "").toString().trim();
+      const city = (formData.get("city") || "").toString().trim();
+      const province = (formData.get("province") || "").toString().trim();
+      const country = (formData.get("country") || "").toString().trim();
+      const zip = (formData.get("zip") || "").toString().trim();
+      const phone = (formData.get("phone") || "").toString().trim();
+      const name = (formData.get("name") || "").toString().trim();
+      const provinceCode = (formData.get("provinceCode") || "").toString().trim();
+      const countryCode = (formData.get("countryCode") || "").toString().trim();
+      const countryName = (formData.get("countryName") || "").toString().trim();
+
+      const location = await db.customerLocation.update({
+        where: { id: locationId },
+        data: {
+          firstName: firstName || null,
+          lastName: lastName || null,
+          company: companyName || null,
+          address1: address1 || null,
+          address2: address2 || null,
+          city: city || null,
+          province: province || null,
+          country: country || null,
+          zip: zip || null,
+          phone: phone || null,
+          name: name || null,
+          provinceCode: provinceCode || null,
+          countryCode: countryCode || null,
+          countryName: countryName || null,
+        },
+      });
+
+      return {
+        success: true,
+        message: "Location updated successfully",
+        location,
+      };
+    }
+
+    if (actionType === "deleteLocation") {
+      const locationId = Number(formData.get("locationId"));
+
+      const existingLocation = await db.customerLocation.findFirst({
+        where: {
+          id: locationId,
+          customerId: customer.id,
+        },
+      });
+
+      if (!existingLocation) {
+        return { success: false, error: "Location not found" };
+      }
+
+      await db.customerLocation.delete({
+        where: { id: locationId },
+      });
+
+      return {
+        success: true,
+        message: "Location deleted successfully",
+      };
+    }
+
     return { success: false, error: "Invalid action type" };
   } catch (error) {
     console.error("Error in action:", error);
@@ -173,47 +271,21 @@ export default function CustomerDetail() {
   const shopify = useAppBridge();
 
   const [isLocationModalOpen, setIsLocationModalOpen] = useState(false);
-  const [locationForm, setLocationForm] = useState({
-    firstName: "",
-    lastName: "",
-    company: "",
-    address1: "",
-    address2: "",
-    city: "",
-    province: "",
-    country: "",
-    zip: "",
-    phone: "",
-    name: "",
-    provinceCode: "",
-    countryCode: "",
-    countryName: "",
-  });
+  const [editingLocation, setEditingLocation] = useState(null);
+  const [locationForm, setLocationForm] = useState(EMPTY_LOCATION_FORM);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [locationToDelete, setLocationToDelete] = useState(null);
 
   const isLoading = fetcher.state === "submitting";
 
   useEffect(() => {
     if (fetcher.data?.success) {
-      shopify.toast.show(fetcher.data.message || "Location added successfully");
-      setLocationForm({
-        firstName: "",
-        lastName: "",
-        company: "",
-        address1: "",
-        address2: "",
-        city: "",
-        province: "",
-        country: "",
-        zip: "",
-        phone: "",
-        name: "",
-        provinceCode: "",
-        countryCode: "",
-        countryName: "",
-      });
+      shopify.toast.show(fetcher.data.message || "Location updated successfully");
+      setLocationForm(EMPTY_LOCATION_FORM);
+      setEditingLocation(null);
       setIsLocationModalOpen(false);
-      // Trigger a page reload or refetch
-      window.location.reload();
+      setIsDeleteModalOpen(false);
+      setLocationToDelete(null);
     } else if (fetcher.data?.error) {
       shopify.toast.show(fetcher.data.error, { isError: true });
     }
@@ -270,6 +342,43 @@ export default function CustomerDetail() {
       <Text>
         {location.city}, {location.province} {location.zip}
       </Text>,
+      <ButtonGroup>
+        <Button
+          icon={EditIcon}
+          variant="tertiary"
+          accessibilityLabel="Edit location"
+          onClick={() => {
+            setEditingLocation(location);
+            setLocationForm({
+              firstName: location.firstName || "",
+              lastName: location.lastName || "",
+              company: location.company || "",
+              address1: location.address1 || "",
+              address2: location.address2 || "",
+              city: location.city || "",
+              province: location.province || "",
+              country: location.country || "",
+              zip: location.zip || "",
+              phone: location.phone || "",
+              name: location.name || "",
+              provinceCode: location.provinceCode || "",
+              countryCode: location.countryCode || "",
+              countryName: location.countryName || "",
+            });
+            setIsLocationModalOpen(true);
+          }}
+        />
+        <Button
+          icon={DeleteIcon}
+          variant="tertiary"
+          tone="critical"
+          accessibilityLabel="Delete location"
+          onClick={() => {
+            setLocationToDelete(location);
+            setIsDeleteModalOpen(true);
+          }}
+        />
+      </ButtonGroup>,
     ]) || [];
 
   // Create order rows from customer data
@@ -285,10 +394,28 @@ export default function CustomerDetail() {
       <Text>{new Date(order.createdAt).toLocaleDateString()}</Text>,
     ]) || [];
 
-  const handleAddLocation = () => {
-    fetcher.submit(locationForm, {
+  const handleSaveLocation = () => {
+    const formData = new FormData();
+    formData.append("actionType", editingLocation ? "updateLocation" : "addLocation");
+    if (editingLocation?.id) {
+      formData.append("locationId", String(editingLocation.id));
+    }
+    Object.entries(locationForm).forEach(([key, value]) => {
+      formData.append(key, value || "");
+    });
+    fetcher.submit(formData, {
       method: "POST",
-      action: "",
+    });
+  };
+
+  const handleConfirmDeleteLocation = () => {
+    if (!locationToDelete?.id) return;
+
+    const formData = new FormData();
+    formData.append("actionType", "deleteLocation");
+    formData.append("locationId", String(locationToDelete.id));
+    fetcher.submit(formData, {
+      method: "POST",
     });
   };
 
@@ -379,7 +506,11 @@ export default function CustomerDetail() {
                       </Text>
                       <Button
                         variant="primary"
-                        onClick={() => setIsLocationModalOpen(true)}
+                        onClick={() => {
+                          setEditingLocation(null);
+                          setLocationForm(EMPTY_LOCATION_FORM);
+                          setIsLocationModalOpen(true);
+                        }}
                       >
                         Add Location
                       </Button>
@@ -389,7 +520,7 @@ export default function CustomerDetail() {
                   <Divider />
 
                   <DataTable
-                    columnContentTypes={["text", "text", "text"]}
+                    columnContentTypes={["text", "text", "text", "text"]}
                     headings={[
                       <Text
                         variant="bodySm"
@@ -412,6 +543,13 @@ export default function CustomerDetail() {
                       >
                         City/Province/Zip
                       </Text>,
+                      <Text
+                        variant="bodySm"
+                        fontWeight="semibold"
+                        tone="subdued"
+                      >
+                        Actions
+                      </Text>,
                     ]}
                     rows={locationRows}
                     hoverable
@@ -432,7 +570,11 @@ export default function CustomerDetail() {
                   </Text>
                   <Button
                     variant="primary"
-                    onClick={() => setIsLocationModalOpen(true)}
+                    onClick={() => {
+                      setEditingLocation(null);
+                      setLocationForm(EMPTY_LOCATION_FORM);
+                      setIsLocationModalOpen(true);
+                    }}
                   >
                     Add Location
                   </Button>
@@ -579,27 +721,43 @@ export default function CustomerDetail() {
         </Layout.Section>
       </Layout>
 
-      {/* Add Location Modal */}
-      <Modal
+      <LocationModal
         open={isLocationModalOpen}
         onClose={() => {
+          setIsLocationModalOpen(false);
+          setEditingLocation(null);
+          setLocationForm(EMPTY_LOCATION_FORM);
+        }}
+        onSubmit={handleSaveLocation}
+        isLoading={isLoading}
+        isEditMode={Boolean(editingLocation)}
+        locationForm={locationForm}
+        setLocationForm={setLocationForm}
+      />
+
+      <Modal
+        open={isDeleteModalOpen}
+        onClose={() => {
           if (!isLoading) {
-            setIsLocationModalOpen(false);
+            setIsDeleteModalOpen(false);
+            setLocationToDelete(null);
           }
         }}
-        title="Add Location"
+        title="Delete Location"
         primaryAction={{
-          content: "Add Location",
-          onAction: handleAddLocation,
+          content: "Delete",
+          tone: "critical",
+          onAction: handleConfirmDeleteLocation,
           loading: isLoading,
-          disabled: isLoading || !locationForm.name,
+          disabled: isLoading,
         }}
         secondaryActions={[
           {
             content: "Cancel",
             onAction: () => {
               if (!isLoading) {
-                setIsLocationModalOpen(false);
+                setIsDeleteModalOpen(false);
+                setLocationToDelete(null);
               }
             },
             disabled: isLoading,
@@ -607,157 +765,9 @@ export default function CustomerDetail() {
         ]}
       >
         <Modal.Section>
-          <BlockStack gap="400">
-            <TextField
-              label="Location Name"
-              value={locationForm.name}
-              onChange={(value) =>
-                setLocationForm({ ...locationForm, name: value })
-              }
-              disabled={isLoading}
-              placeholder="e.g. Downtown Store"
-              requiredIndicator
-              autoComplete="off"
-            />
-
-            <InlineStack gap="300">
-              <TextField
-                label="First Name"
-                value={locationForm.firstName}
-                onChange={(value) =>
-                  setLocationForm({ ...locationForm, firstName: value })
-                }
-                disabled={isLoading}
-                autoComplete="given-name"
-              />
-              <TextField
-                label="Last Name"
-                value={locationForm.lastName}
-                onChange={(value) =>
-                  setLocationForm({ ...locationForm, lastName: value })
-                }
-                disabled={isLoading}
-                autoComplete="family-name"
-              />
-            </InlineStack>
-
-            <TextField
-              label="Company"
-              value={locationForm.company}
-              onChange={(value) =>
-                setLocationForm({ ...locationForm, company: value })
-              }
-              disabled={isLoading}
-              autoComplete="organization"
-            />
-
-            <TextField
-              label="Phone"
-              value={locationForm.phone}
-              onChange={(value) =>
-                setLocationForm({ ...locationForm, phone: value })
-              }
-              disabled={isLoading}
-              placeholder="e.g. (555) 123-4567"
-              autoComplete="tel"
-            />
-
-            <BlockStack gap="200">
-              <Text variant="headingSm" as="h4">
-                Address
-              </Text>
-
-              <TextField
-                label="Address Line 1"
-                value={locationForm.address1}
-                onChange={(value) =>
-                  setLocationForm({ ...locationForm, address1: value })
-                }
-                disabled={isLoading}
-                autoComplete="street-address"
-              />
-
-              <TextField
-                label="Address Line 2"
-                value={locationForm.address2}
-                onChange={(value) =>
-                  setLocationForm({ ...locationForm, address2: value })
-                }
-                disabled={isLoading}
-                autoComplete="address-line2"
-              />
-
-              <InlineStack gap="300">
-                <TextField
-                  label="City"
-                  value={locationForm.city}
-                  onChange={(value) =>
-                    setLocationForm({ ...locationForm, city: value })
-                  }
-                  disabled={isLoading}
-                  autoComplete="address-level2"
-                />
-                <TextField
-                  label="Province"
-                  value={locationForm.province}
-                  onChange={(value) =>
-                    setLocationForm({ ...locationForm, province: value })
-                  }
-                  disabled={isLoading}
-                  autoComplete="address-level1"
-                />
-              </InlineStack>
-
-              <InlineStack gap="300">
-                <TextField
-                  label="Country"
-                  value={locationForm.country}
-                  onChange={(value) =>
-                    setLocationForm({ ...locationForm, country: value })
-                  }
-                  disabled={isLoading}
-                  autoComplete="country-name"
-                />
-                <TextField
-                  label="Zip Code"
-                  value={locationForm.zip}
-                  onChange={(value) =>
-                    setLocationForm({ ...locationForm, zip: value })
-                  }
-                  disabled={isLoading}
-                  autoComplete="postal-code"
-                />
-              </InlineStack>
-
-              <InlineStack gap="300">
-                <TextField
-                  label="Province Code"
-                  value={locationForm.provinceCode}
-                  onChange={(value) =>
-                    setLocationForm({ ...locationForm, provinceCode: value })
-                  }
-                  disabled={isLoading}
-                />
-                <TextField
-                  label="Country Code"
-                  value={locationForm.countryCode}
-                  onChange={(value) =>
-                    setLocationForm({ ...locationForm, countryCode: value })
-                  }
-                  disabled={isLoading}
-                />
-              </InlineStack>
-
-              <TextField
-                label="Country Name"
-                value={locationForm.countryName}
-                onChange={(value) =>
-                  setLocationForm({ ...locationForm, countryName: value })
-                }
-                disabled={isLoading}
-              />
-            </BlockStack>
-          </BlockStack>
+          <Text>
+            Are you sure you want to delete {locationToDelete?.name || "this location"}? This action cannot be undone.
+          </Text>
         </Modal.Section>
       </Modal>
     </Page>
