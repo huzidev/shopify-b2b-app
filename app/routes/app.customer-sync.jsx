@@ -247,6 +247,7 @@ export default function AppCustomerSync() {
       setCustomerToDelete(null);
     }
   };
+  console.log("SW what is customer", currentCustomers);
 
   const rows = (currentCustomers || []).map((customer, index) => (
     <IndexTable.Row id={customer.id} key={customer.id} position={index}>
@@ -257,7 +258,6 @@ export default function AppCustomerSync() {
       </IndexTable.Cell>
       <IndexTable.Cell>{customer.email || "N/A"}</IndexTable.Cell>
       <IndexTable.Cell>{customer.numericId || "N/A"}</IndexTable.Cell>
-      <IndexTable.Cell>{customer.state || "N/A"}</IndexTable.Cell>
       <IndexTable.Cell>
         <Badge tone={customer.syncStatus === "SYNCED" ? "success" : "warning"}>
           {customer.syncStatus === "SYNCED" ? "Synced" : "Not Synced"}
@@ -354,7 +354,6 @@ export default function AppCustomerSync() {
                   { title: "Name" },
                   { title: "Email" },
                   { title: "Shopify ID" },
-                  { title: "State" },
                   { title: "Sync Status" },
                   { title: "Locations" },
                   { title: "Actions" },
