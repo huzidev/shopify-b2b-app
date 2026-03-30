@@ -37,20 +37,81 @@ import { useAppBridge } from "@shopify/app-bridge-react";
 import Decimal from "decimal.js";
 
 const parseDecimal = (value) => {
-  if (!value) return 0;
+  if (value === null || value === undefined || value === "") return 0;
 
-  // If it's already a Decimal (Prisma)
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : 0;
+  }
+
+  if (typeof value === "string") {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : 0;
+  }
+
+  // Decimal.js instance
   if (value instanceof Decimal) {
     return value.toNumber();
   }
 
-  // If it's an object (Prisma raw)
-  if (typeof value === "object" && value !== null) {
-    return new Decimal(value.toString()).toNumber();
+  if (typeof value === "object") {
+    // Handle Decimal.js internal serialized shape: { s, e, d }
+    if (
+      Array.isArray(value.d) &&
+      typeof value.e === "number" &&
+      typeof value.s === "number" &&
+      value.d.length > 0
+    ) {
+      const digits = [
+        String(value.d[0]),
+        ...value.d.slice(1).map((part) => String(part).padStart(7, "0")),
+      ].join("");
+
+      const decimalPos = value.e + 1;
+      let decimalString;
+
+      if (decimalPos <= 0) {
+        decimalString = `0.${"0".repeat(Math.abs(decimalPos))}${digits}`;
+      } else if (decimalPos >= digits.length) {
+        decimalString = `${digits}${"0".repeat(decimalPos - digits.length)}`;
+      } else {
+        decimalString = `${digits.slice(0, decimalPos)}.${digits.slice(decimalPos)}`;
+      }
+
+      if (value.s < 0 && decimalString !== "0") {
+        decimalString = `-${decimalString}`;
+      }
+
+      const numeric = Number(decimalString);
+      return Number.isFinite(numeric) ? numeric : 0;
+    }
+
+    // Prisma Decimal can sometimes carry helper methods.
+    if (typeof value.toNumber === "function") {
+      const numeric = value.toNumber();
+      if (Number.isFinite(numeric)) return numeric;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(value, "$numberDecimal")) {
+      return parseDecimal(value.$numberDecimal);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(value, "value")) {
+      return parseDecimal(value.value);
+    }
+
+    const stringValue = typeof value.toString === "function" ? value.toString() : "";
+    if (stringValue && stringValue !== "[object Object]") {
+      const numeric = Number(stringValue);
+      if (Number.isFinite(numeric)) return numeric;
+      try {
+        return new Decimal(stringValue).toNumber();
+      } catch {
+        return 0;
+      }
+    }
   }
 
-  // If it's string/number
-  return new Decimal(value).toNumber();
+  return 0;
 };
 
 export const loader = async ({ request, params }) => {
@@ -407,7 +468,6 @@ export default function AppCollectionId() {
         ) : (
           <>
             <Text>${discountedPrice.toFixed(2)}</Text>
-            {hasDiscount && <Badge tone="success">Discounted</Badge>}
           </>
         )}
       </InlineStack>,
@@ -436,6 +496,32 @@ export default function AppCollectionId() {
       content: 'Settings',
       panelID: 'settings-panel',
     },
+  ];
+
+  const settingsSummaryRows = [
+    {
+      label: "Status",
+      value: (
+        <Badge tone={collection.status === "ACTIVE" ? "success" : "critical"}>
+          {collection.status === "ACTIVE" ? "Active" : "Inactive"}
+        </Badge>
+      ),
+    },
+    {
+      label: "Current Discount",
+      value: `${parseDecimal(collection.discount)}%`,
+    },
+    {
+      label: "Products",
+      value: collection.products.length,
+    },
+  ];
+
+  const collectionInfoRows = [
+    { label: "Title", value: collection.title },
+    { label: "Description", value: collection.description || "No description" },
+    { label: "Created", value: new Date(collection.createdAt).toLocaleDateString() },
+    { label: "Last Updated", value: new Date(collection.updatedAt).toLocaleDateString() },
   ];
 
   return (
@@ -498,33 +584,57 @@ export default function AppCollectionId() {
                   <BlockStack gap="400">
                     <Text variant="headingMd">Collection Settings</Text>
 
-                    <InlineStack gap="800" align="start" wrap>
-                      {/* Status Section */}
-                      <BlockStack gap="200">
-                        <Text variant="headingSm">Status</Text>
-                        <InlineStack gap="300" blockAlign="center">
-                          <Badge tone={collection.status === 'ACTIVE' ? 'success' : 'critical'}>
-                            {collection.status === 'ACTIVE' ? 'Active' : 'Inactive'}
-                          </Badge>
+                    <Card>
+                      <BlockStack gap="0">
+                        {settingsSummaryRows.map((row, index) => (
+                          <React.Fragment key={row.label}>
+                            <Box paddingBlock="300">
+                              <InlineStack align="space-between" blockAlign="center">
+                                <Text variant="bodyMd" tone="subdued">
+                                  {row.label}
+                                </Text>
+                                {typeof row.value === "string" || typeof row.value === "number" ? (
+                                  <Text variant="bodyMd" fontWeight="semibold">
+                                    {row.value}
+                                  </Text>
+                                ) : (
+                                  row.value
+                                )}
+                              </InlineStack>
+                            </Box>
+                            {index < settingsSummaryRows.length - 1 && <Divider />}
+                          </React.Fragment>
+                        ))}
+                      </BlockStack>
+                    </Card>
+
+                    <Card>
+                      <BlockStack gap="300">
+                        <Text variant="headingSm">Update Settings</Text>
+
+                        <InlineStack gap="300" blockAlign="center" align="space-between">
+                          <InlineStack gap="300" blockAlign="center">
+                            <Text variant="bodyMd" tone="subdued">Collection Status</Text>
+                            <Badge tone={collection.status === "ACTIVE" ? "success" : "critical"}>
+                              {collection.status === "ACTIVE" ? "Active" : "Inactive"}
+                            </Badge>
+                          </InlineStack>
                           <Button
                             variant="primary"
-                            tone={collection.status === 'ACTIVE' ? "critical" : undefined}
+                            tone={collection.status === "ACTIVE" ? "critical" : undefined}
                             onClick={handleStatusToggle}
                             loading={fetcher.state === "submitting"}
                           >
-                            {collection.status === 'ACTIVE' ? 'Deactivate' : 'Activate'}
+                            {collection.status === "ACTIVE" ? "Deactivate" : "Activate"}
                           </Button>
                         </InlineStack>
-                      </BlockStack>
 
-                      {/* Discount Section */}
-                      <BlockStack gap="200">
-                        <Text variant="headingSm">Discount</Text>
-                        <InlineStack gap="300" blockAlign="end">
-                          <Box width="160px">
+                        <Divider />
+
+                        <InlineStack gap="300" blockAlign="end" align="space-between" wrap>
+                          <Box width="200px">
                             <TextField
-                              label=""
-                              labelHidden
+                              label="Discount"
                               type="number"
                               value={collectionDiscountPercentage.toString()}
                               onChange={(value) => setCollectionDiscountPercentage(parseFloat(value) || 0)}
@@ -545,21 +655,33 @@ export default function AppCollectionId() {
                           </Button>
                         </InlineStack>
                         <Text variant="bodySm" tone="subdued">
-                          Current discount: {parseDecimal(collection.discount)}% — Applied to all {collection.products.length} product{collection.products.length !== 1 ? 's' : ''}
+                          This discount applies to all {collection.products.length} product{collection.products.length !== 1 ? "s" : ""} in this collection.
                         </Text>
                       </BlockStack>
-                    </InlineStack>
+                    </Card>
 
-                    <Divider />
-                    
-                    <BlockStack gap="200">
-                      <Text variant="headingSm">Collection Information</Text>
-                      <Text><strong>Title:</strong> {collection.title}</Text>
-                      <Text><strong>Description:</strong> {collection.description || "No description"}</Text>
-                      <Text><strong>Created:</strong> {new Date(collection.createdAt).toLocaleDateString()}</Text>
-                      <Text><strong>Last Updated:</strong> {new Date(collection.updatedAt).toLocaleDateString()}</Text>
-                      <Text><strong>Total Products:</strong> {collection.products.length}</Text>
-                    </BlockStack>
+                    <Card>
+                      <BlockStack gap="300">
+                        <Text variant="headingSm">Collection Information</Text>
+                        <BlockStack gap="0">
+                          {collectionInfoRows.map((row, index) => (
+                            <React.Fragment key={row.label}>
+                              <Box paddingBlock="300">
+                                <InlineStack align="space-between" blockAlign="center">
+                                  <Text variant="bodyMd" tone="subdued">
+                                    {row.label}
+                                  </Text>
+                                  <Text variant="bodyMd" fontWeight="semibold">
+                                    {row.value}
+                                  </Text>
+                                </InlineStack>
+                              </Box>
+                              {index < collectionInfoRows.length - 1 && <Divider />}
+                            </React.Fragment>
+                          ))}
+                        </BlockStack>
+                      </BlockStack>
+                    </Card>
                   </BlockStack>
                 )}
               </Box>
