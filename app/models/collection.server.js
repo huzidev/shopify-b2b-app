@@ -154,6 +154,22 @@ export async function getCollections(shop) {
   }
 }
 
+export function mapCollectionsForInventory(collections = []) {
+  return collections.map((collection) => ({
+    id: collection.id,
+    title: collection.title,
+    description: collection.description || "No description",
+    productCount: collection._count?.products || 0,
+    status: collection.status || "ACTIVE",
+    createdAt: new Date(collection.createdAt).toLocaleDateString(),
+  }));
+}
+
+export async function getCollectionInventoryRows(shop) {
+  const collections = await getCollections(shop);
+  return mapCollectionsForInventory(collections);
+}
+
 // Get a single collection by ID
 export async function getCollection(shop, collectionId) {
   try {

@@ -21,7 +21,7 @@ import {
 import { SearchIcon } from "@shopify/polaris-icons";
 import HowItWorks from "../components/HowItWorks";
 import CompaniesTable from "../components/CompaniesTable";
-import CatalogsTable from "../components/CatalogsTable";
+import CatalogsTable from "../components/CatalogsTable";  
 
 export const loader = async ({ request }) => {
   const { session } = await authenticate.admin(request);

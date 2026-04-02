@@ -183,6 +183,27 @@ export async function getCatalogs(shop, admin = null) {
   }
 }
 
+export function mapCatalogsForInventory(catalogs = []) {
+  return catalogs.map((catalog) => ({
+    id: catalog.id,
+    title: catalog.title,
+    products:
+      catalog.publications?.reduce(
+        (total, publication) => total + (publication.products?.length || 0),
+        0,
+      ) || 0,
+    locations:
+      catalog.assignedLocationCount ?? (catalog.companyLocation ? 1 : 0),
+    companyName: catalog.company?.name || "N/A",
+    status: catalog.status || "ACTIVE",
+  }));
+}
+
+export async function getCatalogInventoryRows(shop, admin = null) {
+  const catalogs = await getCatalogs(shop, admin);
+  return mapCatalogsForInventory(catalogs);
+}
+
 // Get a single catalog with details
 export async function getCatalog(shop, catalogId, admin = null) {
   try {
