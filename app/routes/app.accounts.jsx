@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useFetcher, useLoaderData, useNavigate } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
-import { getCompanies } from "../models/company.server";
+import { createCompany, getCompanies } from "../models/company.server";
 import {
   createCustomerInShopify,
   getCustomerStats,
@@ -17,13 +17,14 @@ import {
   Card,
   IndexTable,
   InlineStack,
-  Modal,
   Page,
   Text,
-  TextField,
 } from "@shopify/polaris";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { ViewIcon, EditIcon, DeleteIcon } from "@shopify/polaris-icons";
+import CustomerCreateModal from "../components/CustomerCreateModal";
+import CustomerDeleteModal from "../components/CustomerDeleteModal";
+import CompanyCreateModal from "../components/CompanyCreateModal";
 
 export const loader = async ({ request }) => {
   const { session } = await authenticate.admin(request);
@@ -41,6 +42,41 @@ export const action = async ({ request }) => {
   const actionType = formData.get("actionType");
 
   try {
+    if (actionType === "createCompany") {
+      const name = (formData.get("name") || "").toString().trim();
+      const locationName = (formData.get("locationName") || "").toString().trim();
+      const firstName = (formData.get("firstName") || "").toString().trim();
+      const lastName = (formData.get("lastName") || "").toString().trim();
+      const email = (formData.get("email") || "").toString().trim();
+
+      if (!name) {
+        return { success: false, error: "Company name is required" };
+      }
+
+      const result = await createCompany({
+        admin,
+        shop: session.shop,
+        name,
+        locationName,
+        firstName,
+        lastName,
+        email,
+      });
+
+      if (!result?.success) {
+        return result;
+      }
+
+      const updatedCompanies = await getCompanies(session.shop);
+
+      return {
+        success: true,
+        view: "companies",
+        message: "Company created successfully",
+        updatedCompanies,
+      };
+    }
+
     if (actionType === "loadCustomers") {
       const [updatedStats, updatedCustomersWithStatus] = await Promise.all([
         getCustomerStats(session.shop),
@@ -174,7 +210,7 @@ export default function Accounts() {
   const navigate = useNavigate();
 
   const [activeView, setActiveView] = useState("companies");
-  const [currentCompanies] = useState(companies || []);
+  const [currentCompanies, setCurrentCompanies] = useState(companies || []);
   const [currentStats, setCurrentStats] = useState({
     totalSyncedCustomers: 0,
     activeCustomers: 0,
@@ -191,6 +227,13 @@ export default function Accounts() {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [customerToDelete, setCustomerToDelete] = useState(null);
 
+  const [isCreateCompanyModalOpen, setIsCreateCompanyModalOpen] = useState(false);
+  const [companyName, setCompanyName] = useState("");
+  const [companyLocationName, setCompanyLocationName] = useState("");
+  const [companyFirstName, setCompanyFirstName] = useState("");
+  const [companyLastName, setCompanyLastName] = useState("");
+  const [companyEmail, setCompanyEmail] = useState("");
+
   const isLoading = fetcher.state === "submitting";
 
   useEffect(() => {
@@ -205,6 +248,10 @@ export default function Accounts() {
         setCurrentStats(fetcher.data.updatedStats);
       }
 
+      if (fetcher.data.updatedCompanies) {
+        setCurrentCompanies(fetcher.data.updatedCompanies);
+      }
+
       if (fetcher.data.updatedCustomersWithStatus) {
         setCurrentCustomers(fetcher.data.updatedCustomersWithStatus);
         setCustomersLoaded(true);
@@ -217,10 +264,19 @@ export default function Accounts() {
         setEmail("");
         setPhone("");
       }
+
+      if (isCreateCompanyModalOpen) {
+        setIsCreateCompanyModalOpen(false);
+        setCompanyName("");
+        setCompanyLocationName("");
+        setCompanyFirstName("");
+        setCompanyLastName("");
+        setCompanyEmail("");
+      }
     } else if (fetcher.data?.error) {
       shopify.toast.show(fetcher.data.error, { isError: true });
     }
-  }, [fetcher.data, isCreateModalOpen, shopify]);
+  }, [fetcher.data, isCreateCompanyModalOpen, isCreateModalOpen, shopify]);
 
   const syncedCount = useMemo(
     () => (currentCustomers || []).filter((customer) => customer.syncStatus === "SYNCED").length,
@@ -238,6 +294,20 @@ export default function Accounts() {
 
   const handleShowCompanies = () => {
     setActiveView("companies");
+  };
+
+  const handleCreateCompanyConfirm = () => {
+    fetcher.submit(
+      {
+        actionType: "createCompany",
+        name: companyName,
+        locationName: companyLocationName,
+        firstName: companyFirstName,
+        lastName: companyLastName,
+        email: companyEmail,
+      },
+      { method: "POST" },
+    );
   };
 
   const handleSyncAllCustomers = () => {
@@ -355,7 +425,7 @@ export default function Accounts() {
       ? {
           primaryAction: {
             content: "Create Company",
-            onAction: () => navigate("/app/create-company"),
+            onAction: () => setIsCreateCompanyModalOpen(true),
           },
           secondaryActions: [
             {
@@ -460,63 +530,44 @@ export default function Accounts() {
         </BlockStack>
       </Page>
 
-      <Modal
+      <CustomerCreateModal
         open={isCreateModalOpen}
         onClose={() => setIsCreateModalOpen(false)}
-        title="Create Customer"
-        primaryAction={{
-          content: "Confirm and Create",
-          onAction: handleCreateCustomerConfirm,
-          loading: isLoading,
-          disabled: isLoading || !email,
-        }}
-        secondaryActions={[
-          {
-            content: "Cancel",
-            onAction: () => setIsCreateModalOpen(false),
-          },
-        ]}
-      >
-        <Modal.Section>
-          <BlockStack gap="300">
-            <Banner tone="info">
-              <Text as="p">Customer will be created in Shopify and immediately synced to the local database.</Text>
-            </Banner>
+        onConfirm={handleCreateCustomerConfirm}
+        isLoading={isLoading}
+        firstName={firstName}
+        setFirstName={setFirstName}
+        lastName={lastName}
+        setLastName={setLastName}
+        email={email}
+        setEmail={setEmail}
+        phone={phone}
+        setPhone={setPhone}
+      />
 
-            <TextField label="First Name" value={firstName} onChange={setFirstName} autoComplete="off" />
-            <TextField label="Last Name" value={lastName} onChange={setLastName} autoComplete="off" />
-            <TextField label="Email" type="email" value={email} onChange={setEmail} autoComplete="off" />
-            <TextField label="Phone" value={phone} onChange={setPhone} autoComplete="off" />
-          </BlockStack>
-        </Modal.Section>
-      </Modal>
-
-      <Modal
+      <CustomerDeleteModal
         open={deleteConfirmOpen}
         onClose={() => setDeleteConfirmOpen(false)}
-        title="Delete Customer"
-        primaryAction={{
-          content: "Delete",
-          onAction: handleConfirmDelete,
-          tone: "critical",
-        }}
-        secondaryActions={[
-          {
-            content: "Cancel",
-            onAction: () => setDeleteConfirmOpen(false),
-          },
-        ]}
-      >
-        <Modal.Section>
-          <BlockStack gap="300">
-            <Banner tone="warning">
-              <Text as="p">
-                Are you sure you want to delete customer <strong>{customerToDelete?.firstName} {customerToDelete?.lastName}</strong>? This action cannot be undone.
-              </Text>
-            </Banner>
-          </BlockStack>
-        </Modal.Section>
-      </Modal>
+        onConfirm={handleConfirmDelete}
+        customer={customerToDelete}
+      />
+
+      <CompanyCreateModal
+        open={isCreateCompanyModalOpen}
+        onClose={() => setIsCreateCompanyModalOpen(false)}
+        onConfirm={handleCreateCompanyConfirm}
+        isLoading={isLoading}
+        name={companyName}
+        setName={setCompanyName}
+        locationName={companyLocationName}
+        setLocationName={setCompanyLocationName}
+        firstName={companyFirstName}
+        setFirstName={setCompanyFirstName}
+        lastName={companyLastName}
+        setLastName={setCompanyLastName}
+        email={companyEmail}
+        setEmail={setCompanyEmail}
+      />
     </>
   );
 }
