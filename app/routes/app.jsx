@@ -38,10 +38,9 @@ function AppContent() {
       <s-app-nav>
         <s-link href="/app">Dashboard</s-link>
         <s-link href="/app/product-sync">Sync Products</s-link>
-        <s-link href="/app/customer-sync">Sync Customers</s-link>
-        <s-link href="/app/companies">Companies</s-link>
+        <s-link href="/app/accounts">Accounts</s-link>
         <s-link href="/app/inventory">Inventory</s-link>
-        <s-link href="/app/orders">B2B Orders</s-link>
+        <s-link href="/app/orders">Orders</s-link>
         <s-link href="/app/subscriptions">Plans</s-link>
       </s-app-nav>
       <Outlet />
