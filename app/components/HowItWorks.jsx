@@ -123,6 +123,32 @@ export default function HowItWorks() {
             </Box>
           ))}
         </InlineStack>
+
+        <Divider />
+
+        <Box
+          padding="400"
+          borderWidth="025"
+          borderColor="border"
+          borderRadius="200"
+          background="bg-surface-secondary"
+        >
+          <InlineStack align="space-between" blockAlign="center" gap="400" wrap>
+            <BlockStack gap="100">
+              <Text variant="headingSm" as="h3">
+                Sync Products
+              </Text>
+              <Text variant="bodySm" tone="subdued">
+                Run a product sync to import Shopify products into your app database. New products
+                created later will sync automatically via the product create webhook.
+              </Text>
+            </BlockStack>
+
+            <Button variant="primary" onClick={() => navigate("/app/product-sync")}>
+              Sync products
+            </Button>
+          </InlineStack>
+        </Box>
       </BlockStack>
     </Card>
   );
